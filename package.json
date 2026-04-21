@@ -1,0 +1,235 @@
+{
+  "name": "gitnexus-vscode",
+  "displayName": "GitNexus",
+  "description": "Graph-powered code intelligence for Copilot. Auto-setup, auto-index, MCP config, and PR review.",
+  "version": "0.1.0",
+  "publisher": "gitnexus",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "icon": "resources/icon.png",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gitnexus.setup",
+        "title": "Setup GitNexus (MCP + Agents)",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.installCli",
+        "title": "Install GitNexus CLI",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.analyze",
+        "title": "Analyze Repo",
+        "category": "GitNexus",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "gitnexus.analyzeForce",
+        "title": "Force Re-index",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.analyzeEmbeddings",
+        "title": "Analyze with Embeddings",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.status",
+        "title": "Show Index Status",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.openDashboard",
+        "title": "Open Graph Dashboard",
+        "category": "GitNexus",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "gitnexus.listRepos",
+        "title": "List Indexed Repos",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.clean",
+        "title": "Clean Index",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.cleanAll",
+        "title": "Clean All Indexes",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.serve",
+        "title": "Start Web UI Bridge Server",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.generateWiki",
+        "title": "Generate Wiki",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.query",
+        "title": "Query Knowledge Graph",
+        "category": "GitNexus",
+        "icon": "$(search)"
+      },
+      {
+        "command": "gitnexus.prReview",
+        "title": "PR Review with GitNexus",
+        "category": "GitNexus",
+        "icon": "$(git-pull-request-review)"
+      },
+      {
+        "command": "gitnexus.addMcpConfig",
+        "title": "Add MCP Config to VS Code",
+        "category": "GitNexus"
+      },
+      {
+        "command": "gitnexus.quickActionRunner",
+        "title": "Quick Action Runner",
+        "category": "GitNexus",
+        "icon": "$(play)"
+      },
+      {
+        "command": "gitnexus.refreshTreeView",
+        "title": "Refresh",
+        "category": "GitNexus",
+        "icon": "$(refresh)"
+      }
+    ],
+    "configuration": {
+      "title": "GitNexus",
+      "properties": {
+        "gitnexus.autoSetupOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show setup banner when opening a workspace without GitNexus configured."
+        },
+        "gitnexus.autoIndex.onOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run analyze when opening a stale workspace."
+        },
+        "gitnexus.autoIndex.onBranchChange": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically re-index when Git HEAD changes and the index is stale."
+        },
+        "gitnexus.analyze.embeddings": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable embedding generation during analyze (slower, better semantic search)."
+        },
+        "gitnexus.stalenessCheckIntervalSeconds": {
+          "type": "number",
+          "default": 60,
+          "description": "How often (seconds) to poll index staleness."
+        },
+        "gitnexus.mcp.preferGlobalBinary": {
+          "type": "boolean",
+          "default": true,
+          "description": "Prefer globally installed gitnexus binary over npx (faster MCP startup)."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gitnexus",
+          "title": "GitNexus",
+          "icon": "resources/icon-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "gitnexus": [
+        {
+          "id": "gitnexus.quickActions",
+          "name": "Quick Actions",
+          "icon": "$(zap)"
+        },
+        {
+          "id": "gitnexus.agents",
+          "name": "Copilot Agents",
+          "icon": "$(robot)"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "gitnexus.quickActionRunner",
+          "when": "view == gitnexus.quickActions",
+          "group": "navigation"
+        },
+        {
+          "command": "gitnexus.openDashboard",
+          "when": "view == gitnexus.quickActions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "gitnexus.refreshTreeView",
+          "when": "view == gitnexus.quickActions || view == gitnexus.agents",
+          "group": "navigation"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "gitnexus.prReview",
+          "group": "gitnexus@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "gitnexus.query",
+          "group": "gitnexus@1",
+          "when": "editorTextFocus"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "gitnexus.refreshTreeView",
+          "when": "false"
+        }
+      ]
+    },
+    "chatSkills": [
+      {
+        "path": "./skills/gitnexus-query/SKILL.md"
+      },
+      {
+        "path": "./skills/gitnexus-pr-review/SKILL.md"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build-icon && npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build-icon": "node scripts/build-icon.mjs",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.39",
+    "@types/vscode": "^1.99.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "sharp": "^0.33.5",
+    "typescript": "^5.4.0"
+  }
+}

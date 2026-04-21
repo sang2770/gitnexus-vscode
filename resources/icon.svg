@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Background -->
+  <rect width="128" height="128" rx="22" fill="#1e1e2e"/>
+
+  <!-- Graph edges -->
+  <line x1="64" y1="64" x2="26"  y2="28"  stroke="#569cd6" stroke-width="3"   stroke-linecap="round" opacity="0.8"/>
+  <line x1="64" y1="64" x2="102" y2="28"  stroke="#569cd6" stroke-width="3"   stroke-linecap="round" opacity="0.8"/>
+  <line x1="64" y1="64" x2="105" y2="77"  stroke="#4ec9b0" stroke-width="3"   stroke-linecap="round" opacity="0.8"/>
+  <line x1="64" y1="64" x2="64"  y2="108" stroke="#4ec9b0" stroke-width="3"   stroke-linecap="round" opacity="0.8"/>
+  <line x1="64" y1="64" x2="23"  y2="77"  stroke="#569cd6" stroke-width="3"   stroke-linecap="round" opacity="0.8"/>
+
+  <!-- Cross edges (faint) -->
+  <line x1="26"  y1="28" x2="102" y2="28"  stroke="#569cd6" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+  <line x1="105" y1="77" x2="64"  y2="108" stroke="#4ec9b0" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+  <line x1="23"  y1="77" x2="64"  y2="108" stroke="#4ec9b0" stroke-width="1.5" stroke-linecap="round" opacity="0.35"/>
+
+  <!-- Outer nodes -->
+  <circle cx="26"  cy="28"  r="9" fill="#569cd6"/>
+  <circle cx="102" cy="28"  r="9" fill="#569cd6"/>
+  <circle cx="105" cy="77"  r="9" fill="#4ec9b0"/>
+  <circle cx="64"  cy="108" r="9" fill="#4ec9b0"/>
+  <circle cx="23"  cy="77"  r="9" fill="#569cd6"/>
+
+  <!-- Center hub glow ring -->
+  <circle cx="64" cy="64" r="18" fill="#1e1e2e" stroke="#c586c0" stroke-width="3"/>
+  <!-- Center hub fill -->
+  <circle cx="64" cy="64" r="11" fill="#c586c0"/>
+</svg>
