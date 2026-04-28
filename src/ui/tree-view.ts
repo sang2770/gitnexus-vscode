@@ -54,7 +54,6 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
 
     const actions: Array<{ label: string; description: string; command: string }> = [
       { label: 'Setup GitNexus (MCP + Agents)', description: 'Install/check CLI + configure MCP and agents', command: 'gitnexus.setup' },
-      { label: 'Quick Action Runner', description: 'Open quick command picker', command: 'gitnexus.quickActionRunner' },
       { label: 'Analyze Repo', description: 'Index repository with default options', command: 'gitnexus.analyze' },
       { label: 'Force Re-index', description: 'Full rebuild of index', command: 'gitnexus.analyzeForce' },
       { label: 'Analyze with Embeddings', description: 'Enable semantic vectors', command: 'gitnexus.analyzeEmbeddings' },

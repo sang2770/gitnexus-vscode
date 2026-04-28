@@ -3,6 +3,7 @@ import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ensureRuntimeDependencies } from './runtime-init.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -57,35 +58,32 @@ export function resolveGitnexusBin(): string | null {
 export function resolveLocalGitnexusCliPath(baseDir?: string): string | null {
   // Walk up from __dirname (src/process) to the extension root
   const extensionRoot = baseDir ?? path.resolve(__dirname, '..', '..');
-  const localCli = path.join(extensionRoot, "GitNexus", 'gitnexus', 'dist', 'cli');
+  const localCli = path.join(extensionRoot, 'GitNexus', 'gitnexus', 'dist', 'cli', 'index.js');
   return fs.existsSync(localCli) ? localCli : null;
+}
+
+export function resolveBundledGitnexusCliPath(baseDir?: string): string | null {
+  const extensionRoot = baseDir ?? path.resolve(__dirname, '..', '..');
+  const runtimeRoot = path.join(extensionRoot, 'runtime', 'gitnexus');
+  const bundledCli = path.join(runtimeRoot, 'dist', 'cli', 'index.js');
+  console.log(`Resolving bundled CLI at ${bundledCli}`);
+  return fs.existsSync(bundledCli) ? bundledCli : null;
+}
+
+function resolvePreferredLocalCliPath(baseDir?: string): string | null {
+  return resolveBundledGitnexusCliPath(baseDir) ?? resolveLocalGitnexusCliPath(baseDir);
 }
 
 /**
  * Resolve an MCP entry for VS Code mcp.json.
- * Priority: local built CLI -> global binary -> npx fallback.
+ * Runtime-only: use bundled CLI inside extension package.
  */
 export function resolveMcpEntry(baseDir?: string): CliEntry {
-  const localCli = resolveLocalGitnexusCliPath(baseDir);
-  if (localCli) {
-    return { command: 'node', args: [localCli, 'mcp'] };
+  const bundledCli = resolveBundledGitnexusCliPath(baseDir);
+  if (!bundledCli) {
+    throw new Error('GitNexus bundled runtime CLI not found. Reinstall extension package or run npm run build && npm run package.');
   }
-
-  const bin = resolveGitnexusBin();
-  if (bin) {
-    if (process.platform === 'win32') {
-      return { command: 'cmd', args: ['/c', bin, 'mcp'] };
-    }
-    return { command: bin, args: ['mcp'] };
-  }
-
-  if (process.platform === 'win32') {
-    return {
-      command: 'cmd',
-      args: ['/c', 'npx', '-y', 'gitnexus@latest', 'mcp'],
-    };
-  }
-  return { command: 'npx', args: ['-y', 'gitnexus@latest', 'mcp'] };
+  return { command: 'node', args: [bundledCli, 'mcp'] };
 }
 
 /**
@@ -97,27 +95,11 @@ function buildSpawnDescriptor(args: string[]): {
   args: string[];
   shell: boolean;
 } {
-  const localCli = resolveLocalGitnexusCliPath();
-  if (localCli) {
-    return { command: 'node', args: [localCli, ...args], shell: false };
+  const localCli = resolvePreferredLocalCliPath();
+  if (!localCli) {
+    throw new Error('GitNexus local CLI is unavailable (runtime dependencies may have failed to install). Run: npm run build, then retry.');
   }
-
-  const bin = resolveGitnexusBin();
-
-  if (process.platform === 'win32') {
-    if (bin) {
-      // Use cmd /c so .cmd shims resolve correctly
-      return { command: 'cmd', args: ['/c', bin, ...args], shell: false };
-    }
-    // Fallback: npx via cmd
-    return { command: 'cmd', args: ['/c', 'npx', '-y', 'gitnexus@latest', ...args], shell: false };
-  }
-
-  // macOS / Linux — plain binary or npx
-  if (bin) {
-    return { command: bin, args, shell: false };
-  }
-  return { command: 'npx', args: ['-y', 'gitnexus@latest', ...args], shell: false };
+  return { command: 'node', args: [localCli, ...args], shell: false };
 }
 
 function quoteForShell(arg: string): string {
@@ -188,7 +170,28 @@ export async function runGitnexus(
   opts: SpawnOptions = {},
 ): Promise<CliRunResult> {
   const channel = getOutputChannel();
-  const descriptor = buildSpawnDescriptor(args);
+  const extensionRoot = path.resolve(__dirname, '..', '..');
+  const runtimeReady = await ensureRuntimeDependencies(extensionRoot, {
+    showProgress: true,
+    outputChannel: channel,
+  });
+
+  if (!runtimeReady && !resolveLocalGitnexusCliPath(extensionRoot)) {
+    const message = 'GitNexus runtime dependency install failed. Check Output panel and run npm run build if needed.';
+    channel.appendLine(`\n$ gitnexus ${args.join(' ')}`);
+    channel.appendLine(`[process error: ${message}]`);
+    return { stdout: '', stderr: message, exitCode: 1 };
+  }
+
+  let descriptor;
+  try {
+    descriptor = buildSpawnDescriptor(args);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    channel.appendLine(`\n$ gitnexus ${args.join(' ')}`);
+    channel.appendLine(`[process error: ${message}]`);
+    return { stdout: '', stderr: message, exitCode: 1 };
+  }
   const cwd = opts.cwd ?? getWorkspaceRoot();
   const env = { ...process.env, ...(opts.env ?? {}) };
 

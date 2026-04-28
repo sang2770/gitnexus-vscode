@@ -1,10 +1,8 @@
 import * as vscode from 'vscode';
 import {
-  resolveGitnexusBin,
+  resolveBundledGitnexusCliPath,
   resolveLocalGitnexusCliPath,
-  resolveNpmBin,
   resolveNodeVersion,
-  installGitnexusCli,
 } from '../process/cli-runner.js';
 
 export interface PrerequisiteStatus {
@@ -16,13 +14,12 @@ export interface PrerequisiteStatus {
 
 export function checkPrerequisites(): PrerequisiteStatus {
   const node = resolveNodeVersion();
-  const npm = resolveNpmBin();
-  const gitnexus = resolveLocalGitnexusCliPath() ?? resolveGitnexusBin();
+  const gitnexus = resolveBundledGitnexusCliPath() ?? resolveLocalGitnexusCliPath();
   return {
     node,
-    npm,
+    npm: null,
     gitnexus,
-    ready: !!node && !!(gitnexus || npm),
+    ready: !!node && !!gitnexus,
   };
 }
 
@@ -50,60 +47,9 @@ export async function ensureGitnexusCli(): Promise<boolean> {
     return false;
   }
 
-  if (!status.npm) {
-    // Can still run via npx, warn the user
-    const choice = await vscode.window.showWarningMessage(
-      'GitNexus CLI not found globally, but npx is available — commands will use npx (slower cold start).',
-      'Install Globally',
-      'Continue with npx',
-    );
-    if (choice === 'Install Globally') {
-      return installWithProgress();
-    }
-    return true; // allow npx fallback
-  }
-
-  // npm available, gitnexus not installed
-  const choice = await vscode.window.showWarningMessage(
-    'GitNexus CLI is not installed. Install it globally now?',
-    { modal: false },
-    'Install',
-    'Use npx (slower)',
-    'Cancel',
+  // CLI not found, but will be installed lazily on first use
+  vscode.window.showInformationMessage(
+    'GitNexus will install dependencies on first use. This may take a moment.',
   );
-
-  if (choice === 'Install') {
-    return installWithProgress();
-  }
-  if (choice === 'Use npx (slower)') {
-    return true;
-  }
-  return false;
-}
-
-async function installWithProgress(): Promise<boolean> {
-  return vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'GitNexus: Installing CLI globally…',
-      cancellable: true,
-    },
-    async (_progress, token) => {
-      const ok = await installGitnexusCli(token);
-      if (ok) {
-        vscode.window.showInformationMessage('GitNexus CLI installed — ready to use.');
-      } else {
-        vscode.window.showErrorMessage(
-          'GitNexus CLI installation failed. Check the Output panel (GitNexus) for details.',
-          'Show Output',
-        ).then((choice) => {
-          if (choice === 'Show Output') {
-            const { getOutputChannel } = require('../process/cli-runner.js');
-            getOutputChannel().show();
-          }
-        });
-      }
-      return ok;
-    },
-  );
+  return true;
 }

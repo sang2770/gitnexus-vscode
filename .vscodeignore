@@ -1,0 +1,48 @@
+# Development
+.git
+.gitignore
+.gitmodules
+GitNexus/
+node_modules
+runtime/gitnexus/node_modules
+runtime/gitnexus/.runtime-initialized
+out
+*.map
+
+# TypeScript sources
+src/**
+tsconfig.json
+
+# Build artifacts
+*.vsix
+dist/
+
+# Tests & configs
+test
+vitest.config.ts
+playwright.config.ts
+
+# Scripts
+scripts
+*.mjs
+*.cjs
+
+# Documentation
+CONTRIBUTING.md
+*.md
+
+# Hidden files
+.github
+.vscode
+.eslintignore
+.eslintrc
+
+# Root workspace config
+*.sln
+gitnexus-vscode-*.vsix
+
+# Include explicitly (allowed)
+cli/
+!runtime/**
+!resources/**
+!out/**

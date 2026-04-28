@@ -19,13 +19,14 @@ import {
   openDashboardCommand,
 } from './commands/misc.js';
 import { writeMcpConfigWithFeedback } from './config/mcp-config-writer.js';
-import { runStartupHealthCheck } from './config/startup-health-check.js';
+import { runStartupHealthCheck, autoStartGitnexusServer } from './config/startup-health-check.js';
 import { GitNexusStatusBar } from './ui/status-bar.js';
 import { StalenessMonitor } from './staleness/staleness-monitor.js';
 import { QuickActionsTreeProvider, AgentsTreeProvider } from './ui/tree-view.js';
 import { getWorkspaceRoot } from './process/cli-runner.js';
 
 export function activate(context: vscode.ExtensionContext): void {
+
   // ----------------------------------------------------------------
   // Status bar
   // ----------------------------------------------------------------
@@ -50,32 +51,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerTreeDataProvider('gitnexus.agents', agentsProvider),
   );
 
-  const runQuickActionRunner = async (): Promise<void> => {
-    const items: Array<{ label: string; description: string; command: string }> = [
-      { label: 'Setup GitNexus (MCP + Agents)', description: 'Install/check CLI + configure MCP and agents', command: 'gitnexus.setup' },
-      { label: 'Analyze Repo', description: 'Index repository with default options', command: 'gitnexus.analyze' },
-      { label: 'Force Re-index', description: 'Full rebuild of index', command: 'gitnexus.analyzeForce' },
-      { label: 'Analyze with Embeddings', description: 'Enable semantic vectors', command: 'gitnexus.analyzeEmbeddings' },
-      { label: 'Show Index Status', description: 'Check index freshness', command: 'gitnexus.status' },
-      { label: 'List Indexed Repos', description: 'Show registered repos', command: 'gitnexus.listRepos' },
-      { label: 'Open Graph Dashboard', description: 'Open dependency graph dashboard in VS Code', command: 'gitnexus.openDashboard' },
-      { label: 'PR Review', description: 'Run PR impact analysis', command: 'gitnexus.prReview' },
-      { label: 'Start Bridge Server', description: 'Run gitnexus serve', command: 'gitnexus.serve' },
-      { label: 'Query Knowledge Graph', description: 'Run quick graph query', command: 'gitnexus.query' },
-      { label: 'Generate Wiki', description: 'Generate wiki from graph', command: 'gitnexus.generateWiki' },
-      { label: 'Clean Index', description: 'Delete current repo index', command: 'gitnexus.clean' },
-    ];
-
-    const pick = await vscode.window.showQuickPick(items, {
-      placeHolder: 'GitNexus Quick Action Runner',
-      matchOnDescription: true,
-    });
-    if (!pick) {
-      return;
-    }
-    await vscode.commands.executeCommand(pick.command);
-  };
-
   // ----------------------------------------------------------------
   // Commands
   // ----------------------------------------------------------------
@@ -83,7 +58,6 @@ export function activate(context: vscode.ExtensionContext): void {
     ['gitnexus.setup', setupCommand],
     ['gitnexus.installCli', installCliCommand],
 
-    ['gitnexus.quickActionRunner', runQuickActionRunner],
     ['gitnexus.analyze', analyzeCommand],
     ['gitnexus.analyzeForce', analyzeForceCommand],
     ['gitnexus.analyzeEmbeddings', analyzeWithEmbeddingsCommand],
@@ -122,6 +96,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Startup project health check: MCP presence
   void runStartupHealthCheck(getWorkspaceRoot());
+
+  // Auto-start gitnexus bridge server
+  void autoStartGitnexusServer(getWorkspaceRoot());
 }
 
 export function deactivate(): void {

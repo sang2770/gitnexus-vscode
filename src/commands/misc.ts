@@ -143,7 +143,7 @@ export async function prReviewCommand(): Promise<void> {
 
       const encodedPrompt = encodeURIComponent(prompt);
       // VS Code Copilot chat URI — opens chat with prefilled prompt
-      const chatUri = vscode.Uri.parse(`vscode://GitHub.copilot-chat/openChat?agent=gitnexus-pr-review&prompt=${encodedPrompt}`);
+      const chatUri = vscode.Uri.parse(`vscode://xpl.chat-uri/startChat?agent=gitnexus-pr-review&prompt=${encodedPrompt}`);
       await vscode.commands.executeCommand('vscode.open', chatUri);
     },
   );
@@ -216,12 +216,13 @@ function getGitnexusWebHtml(webview: vscode.Webview, distDir: string): string {
   }
 
   const distUri = webview.asWebviewUri(vscode.Uri.file(distDir)).toString();
+  const nonce = crypto.randomBytes(16).toString('hex');
   const csp = [
     "default-src 'none'",
     `img-src ${webview.cspSource} https: data: blob:`,
     `font-src ${webview.cspSource} https:`,
     `style-src ${webview.cspSource} 'unsafe-inline' https:`,
-    `script-src ${webview.cspSource} 'unsafe-inline'`,
+    `script-src ${webview.cspSource} 'nonce-${nonce}'`,
     `connect-src ${webview.cspSource} https: http://localhost:4747 http://127.0.0.1:4747 ws://localhost:4747 ws://127.0.0.1:4747`,
     `worker-src ${webview.cspSource} blob:`,
   ].join('; ');
@@ -234,12 +235,14 @@ function getGitnexusWebHtml(webview: vscode.Webview, distDir: string): string {
   // Remove crossorigin attributes — webview resource URIs don't serve CORS headers,
   // so crossorigin causes module scripts and stylesheets to fail to load.
   html = html.replace(/\s+crossorigin(?:=["'][^"']*["'])?/gi, '');
+  // Attach nonce to all script tags so module bootstrap can run under CSP.
+  html = html.replace(/<script(\s|>)/gi, `<script nonce="${nonce}"$1`);
 
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}" />`;
   if (html.includes('http-equiv="Content-Security-Policy"')) {
     html = html.replace(/<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>/i, cspMeta);
   } else {
-    html = html.replace('<head>', `<head>\n    ${cspMeta}`);
+    html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${cspMeta}`);
   }
 
   return html;
@@ -249,10 +252,11 @@ function getFallbackDashboardHtml(webview: vscode.Webview, nonce: string): strin
   const dashboardUrl = 'http://127.0.0.1:4747';
   const csp = [
     "default-src 'none'",
-    `style-src ${webview.cspSource}`,
-    `script-src 'nonce-${nonce}'`,
+    `style-src ${webview.cspSource} 'nonce-${nonce}'`,
+    `script-src ${webview.cspSource} 'nonce-${nonce}'`,
     `img-src ${webview.cspSource} https: data:`,
-    `connect-src ${dashboardUrl}`,
+    `frame-src ${dashboardUrl}`,
+    `connect-src ${dashboardUrl} ws://127.0.0.1:4747 ws://localhost:4747`,
   ].join('; ');
 
   return `<!DOCTYPE html>
@@ -261,74 +265,111 @@ function getFallbackDashboardHtml(webview: vscode.Webview, nonce: string): strin
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GitNexus Graph Dashboard</title>
-    <style>
-      :root {
-        color-scheme: light dark;
-      }
+    <title>GitNexus Dashboard Setup</title>
+    <style nonce="${nonce}">
+      :root { color-scheme: light dark; }
       body {
-        <title>GitNexus Dashboard Setup</title>
+        margin: 0;
         font-family: var(--vscode-font-family);
+        color: var(--vscode-foreground);
+        background: var(--vscode-editor-background);
+      }
       .header {
         display: flex;
-            font-family: var(--vscode-font-family);
         align-items: center;
-        padding: 8px 12px;
+        gap: 8px;
+        padding: 10px 12px;
         border-bottom: 1px solid var(--vscode-panel-border);
-          .container {
-            max-width: 760px;
-            margin: 20px auto;
-            border: 1px solid var(--vscode-panel-border);
-            padding: 16px;
+      }
+      .title { font-weight: 600; }
+      .container {
+        max-width: 780px;
+        margin: 16px auto;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 8px;
+        padding: 16px;
+      }
+      .hint {
+        color: var(--vscode-descriptionForeground);
+        line-height: 1.5;
+        margin-bottom: 12px;
+      }
+      .cmd {
+        margin: 8px 0 14px 0;
+        padding: 8px;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 6px;
+        background: var(--vscode-editorWidget-background);
+        font-family: var(--vscode-editor-font-family);
+        white-space: pre-wrap;
+      }
+      button {
+        padding: 6px 12px;
+        border-radius: 6px;
         border: 1px solid var(--vscode-button-border, transparent);
-          h2 {
-            margin-top: 0;
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
         cursor: pointer;
       }
       button.secondary {
         background: var(--vscode-editorWidget-background);
         color: var(--vscode-editorWidget-foreground);
-            padding: 6px 12px;
+      }
       #dashboard {
-            margin-right: 8px;
         width: 100%;
-        height: calc(100vh - 44px);
+        height: calc(100vh - 48px);
         border: 0;
       }
-      .hint {
-          .hint {
-            color: var(--vscode-descriptionForeground);
-            line-height: 1.5;
-            margin-bottom: 14px;
-          }
-          .cmd {
-            margin: 8px 0 14px 0;
-            padding: 8px;
-            border: 1px solid var(--vscode-panel-border);
-            background: var(--vscode-editorWidget-background);
-            font-family: var(--vscode-editor-font-family);
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
       <span class="title">GitNexus Graph Dashboard</span>
       <button id="refresh" type="button">Refresh</button>
       <button id="openExternal" class="secondary" type="button">Open in Browser</button>
     </div>
-        <div class="container">
-          <h2>GitNexus Dashboard needs gitnexus-web build output</h2>
-          <div class="hint">
-            This workspace does not currently expose a built gitnexus-web dist folder for embedding in VS Code webview.
-          </div>
-          <div class="hint">Build gitnexus-web once, then reopen Open Graph Dashboard:</div>
-          <div class="cmd">cd repo/GitNexus/gitnexus-web && npm run build</div>
-          <button id="startBridge" type="button">Start Bridge Server</button>
+
+    <div id="fallback" class="container">
+      <h2>GitNexus Dashboard assets are unavailable</h2>
+      <div class="hint">
+        The embedded dashboard build was not found in this extension package.
+      </div>
+      <div class="hint">Rebuild and package extension, then reopen dashboard:</div>
+      <div class="cmd">npm run build:web && npm run package</div>
+      <button id="startBridge" type="button">Start Bridge Server</button>
+    </div>
+
+    <iframe id="dashboard" src="${dashboardUrl}" title="GitNexus Graph Dashboard" class="hidden"></iframe>
+
+    <script nonce="${nonce}">
       const vscode = acquireVsCodeApi();
       const dashboardUrl = ${JSON.stringify(dashboardUrl)};
+      const dashboard = document.getElementById('dashboard');
+      const fallback = document.getElementById('fallback');
+      const refreshButton = document.getElementById('refresh');
       const openExternalButton = document.getElementById('openExternal');
+      const startBridgeButton = document.getElementById('startBridge');
+
+      function loadDashboard() {
+        dashboard.src = dashboardUrl;
+        dashboard.classList.remove('hidden');
+      }
 
       refreshButton.addEventListener('click', () => {
-          const startBridgeButton = document.getElementById('startBridge');
+        loadDashboard();
+      });
 
       openExternalButton.addEventListener('click', () => {
-          startBridgeButton.addEventListener('click', () => {
-            vscode.postMessage({ type: 'startBridgeServer' });
+        vscode.postMessage({ type: 'openExternal', payload: { url: dashboardUrl } });
+      });
+
+      startBridgeButton.addEventListener('click', () => {
+        vscode.postMessage({ type: 'startBridgeServer' });
+      });
+
+      // Attempt to render dashboard immediately; keep fallback available for manual recovery.
+      loadDashboard();
     </script>
   </body>
 </html>`;
@@ -336,6 +377,7 @@ function getFallbackDashboardHtml(webview: vscode.Webview, nonce: string): strin
 
 function resolveGitnexusWebDist(extensionRoot: string): string | undefined {
   const candidates = [
+    path.join(extensionRoot, 'runtime', 'web', 'dist'),
     path.join(extensionRoot, 'GitNexus', 'gitnexus-web', 'dist'),
   ];
 

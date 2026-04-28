@@ -99,12 +99,6 @@
         "category": "GitNexus"
       },
       {
-        "command": "gitnexus.quickActionRunner",
-        "title": "Quick Action Runner",
-        "category": "GitNexus",
-        "icon": "$(play)"
-      },
-      {
         "command": "gitnexus.refreshTreeView",
         "title": "Refresh",
         "category": "GitNexus",
@@ -172,11 +166,6 @@
     "menus": {
       "view/title": [
         {
-          "command": "gitnexus.quickActionRunner",
-          "when": "view == gitnexus.quickActions",
-          "group": "navigation"
-        },
-        {
           "command": "gitnexus.openDashboard",
           "when": "view == gitnexus.quickActions",
           "group": "navigation@1"
@@ -217,11 +206,19 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run build-icon && npm run compile",
+    "vscode:prepublish": "npm run build",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "build-icon": "node scripts/build-icon.mjs",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "build": "npm run build:deps && npm run build:ext",
+    "build:deps": "npm run build:shared && npm run build:gitnexus && npm run build:web && npm run bundle:cli",
+    "build:shared": "cd GitNexus/gitnexus-shared && npm run build",
+    "build:gitnexus": "cd GitNexus/gitnexus && npm run build",
+    "build:web": "cd GitNexus/gitnexus-web && npm run build",
+    "build:ext": "npm run build-icon && npm run compile",
+    "bundle:cli": "node scripts/copy-cli.mjs",
+    "package": "vsce package --allow-missing-repository --skip-license --out gitnexus-vscode.vsix"
   },
   "devDependencies": {
     "@types/node": "^20.19.39",
@@ -230,6 +227,7 @@
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "sharp": "^0.33.5",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vsce": "^3.0.0"
   }
 }
