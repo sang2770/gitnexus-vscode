@@ -1,6 +1,7 @@
-import * as vscode from 'vscode';
-import { ensureGitnexusCli } from '../process/prerequisites.js';
-import { runGitnexus, getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
+﻿import * as vscode from 'vscode';
+import { ensureCodeBrainCli } from '../process/prerequisites.js';
+import { runCodeBrain, getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
+import { getActiveRepoPath } from '../process/group-context.js';
 
 export interface AnalyzeOptions {
   force?: boolean;
@@ -10,21 +11,25 @@ export interface AnalyzeOptions {
   path?: string;
 }
 
-export async function analyzeCommand(opts: AnalyzeOptions = {}): Promise<boolean> {
-  const ok = await ensureGitnexusCli();
+export async function analyzeCommand(
+  opts: AnalyzeOptions = {},
+  context?: vscode.ExtensionContext,
+): Promise<boolean> {
+  const ok = await ensureCodeBrainCli();
   if (!ok) {
     return false;
   }
 
-  const config = vscode.workspace.getConfiguration('gitnexus');
+  const config = vscode.workspace.getConfiguration('codebrain');
   const channel = getOutputChannel();
   channel.show(true);
 
   const workspaceRoot = getWorkspaceRoot();
+  const activeRepoPath = context ? await getActiveRepoPath(context.globalState) : undefined;
 
   // Choose target path: allow user to pick if not specified
-  let targetPath = opts.path ?? workspaceRoot;
-  if (!opts.path) {
+  let targetPath = opts.path ?? activeRepoPath ?? workspaceRoot;
+  if (!opts.path && !activeRepoPath) {
     const folders = vscode.workspace.workspaceFolders;
     if (folders && folders.length > 1) {
       const items = folders.map((f) => ({ label: f.name, description: f.uri.fsPath }));
@@ -58,11 +63,11 @@ export async function analyzeCommand(opts: AnalyzeOptions = {}): Promise<boolean
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: 'GitNexus: Indexing repository…',
+      title: 'CodeBrain: Analyzing...',
       cancellable: true,
     },
     async (_progress, token) => {
-      const result = await runGitnexus(args, { cwd: targetPath, stream: true, token });
+      const result = await runCodeBrain(args, { cwd: targetPath, stream: true, token });
       if (token.isCancellationRequested) {
         vscode.window.showWarningMessage('GitNexus: Analyze cancelled.');
         return false;

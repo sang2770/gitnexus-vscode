@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+﻿import * as vscode from 'vscode';
 import { setupCommand, installCliCommand } from './commands/setup.js';
 import {
   analyzeCommand,
@@ -12,93 +12,119 @@ import {
   listReposCommand,
 } from './commands/clean.js';
 import {
+  selectRepoCommand,
+  selectGroupCommand,
+  repoMenuCommand,
+  createGroupCommand,
+  syncGroupCommand,
+  clearActivationCommand,
+  showActiveContextCommand,
+  addRepoToGroupCommand,
+  removeRepoFromGroupCommand,
+} from './commands/group.js';
+import {
   queryCommand,
   wikiCommand,
   serveCommand,
   prReviewCommand,
   openDashboardCommand,
 } from './commands/misc.js';
-import { writeMcpConfigWithFeedback } from './config/mcp-config-writer.js';
-import { runStartupHealthCheck, autoStartGitnexusServer } from './config/startup-health-check.js';
-import { GitNexusStatusBar } from './ui/status-bar.js';
+import { runStartupHealthCheck, autoStartCodeBrainServer } from './config/startup-health-check.js';
+import { CodeBrainStatusBar } from './ui/status-bar.js';
 import { StalenessMonitor } from './staleness/staleness-monitor.js';
-import { QuickActionsTreeProvider, AgentsTreeProvider } from './ui/tree-view.js';
-import { getWorkspaceRoot } from './process/cli-runner.js';
+import { QuickActionsTreeProvider, AgentsTreeProvider, GroupsReposTreeProvider } from './ui/tree-view.js';
+import { getWorkspaceRoot, initializeCodeBrainRuntime } from './process/cli-runner.js';
 
 export function activate(context: vscode.ExtensionContext): void {
+  initializeCodeBrainRuntime(context.globalStorageUri.fsPath);
 
   // ----------------------------------------------------------------
   // Status bar
   // ----------------------------------------------------------------
-  const statusBar = new GitNexusStatusBar();
+  const statusBar = new CodeBrainStatusBar(context.globalState);
   context.subscriptions.push(statusBar);
 
   // ----------------------------------------------------------------
-  // Staleness monitor
+  // Staleness monitor (deferred: starts after a brief delay to let startup settle)
   // ----------------------------------------------------------------
-  const staleness = new StalenessMonitor(statusBar);
-  staleness.start();
-  context.subscriptions.push(staleness);
+  let staleness: StalenessMonitor | undefined;
+  setTimeout(() => {
+    staleness = new StalenessMonitor(statusBar);
+    staleness.start();
+    context.subscriptions.push(staleness);
+  }, 1000);
 
   // ----------------------------------------------------------------
   // Tree views
   // ----------------------------------------------------------------
   const quickActionsProvider = new QuickActionsTreeProvider();
   const agentsProvider = new AgentsTreeProvider();
+  const groupsReposProvider = new GroupsReposTreeProvider(context.globalState);
 
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('gitnexus.quickActions', quickActionsProvider),
-    vscode.window.registerTreeDataProvider('gitnexus.agents', agentsProvider),
+    vscode.window.registerTreeDataProvider('codebrain.quickActions', quickActionsProvider),
+    vscode.window.registerTreeDataProvider('codebrain.agents', agentsProvider),
+    vscode.window.registerTreeDataProvider('codebrain.groupsRepos', groupsReposProvider),
   );
 
   // ----------------------------------------------------------------
   // Commands
   // ----------------------------------------------------------------
-  const cmds: Array<[string, () => unknown]> = [
-    ['gitnexus.setup', setupCommand],
-    ['gitnexus.installCli', installCliCommand],
+  const cmds: Array<[string, (...args: any[]) => unknown]> = [
+    ['codebrain.setup', setupCommand],
+    ['codebrain.installCli', installCliCommand],
 
-    ['gitnexus.analyze', analyzeCommand],
-    ['gitnexus.analyzeForce', analyzeForceCommand],
-    ['gitnexus.analyzeEmbeddings', analyzeWithEmbeddingsCommand],
+    ['codebrain.analyze', () => analyzeCommand({}, context)],
+    ['codebrain.analyzeForce', () => analyzeCommand({ force: true }, context)],
+    // ['codebrain.analyzeEmbeddings', analyzeWithEmbeddingsCommand],
 
-    ['gitnexus.status', statusCommand],
-    ['gitnexus.listRepos', listReposCommand],
-    ['gitnexus.clean', cleanCommand],
-    ['gitnexus.cleanAll', cleanAllCommand],
+    ['codebrain.status', () => statusCommand(context)],
+    ['codebrain.listRepos', listReposCommand],
+    ['codebrain.clean', cleanCommand],
+    ['codebrain.cleanAll', cleanAllCommand],
 
-    ['gitnexus.serve', serveCommand],
-    ['gitnexus.openDashboard', () => openDashboardCommand(context)],
-    ['gitnexus.generateWiki', wikiCommand],
-    ['gitnexus.query', queryCommand],
-    ['gitnexus.prReview', prReviewCommand],
+    ['codebrain.serve', serveCommand],
+    ['codebrain.openDashboard', () => openDashboardCommand(context)],
+    ['codebrain.generateWiki', wikiCommand],
+    ['codebrain.query', () => queryCommand(context)],
+    ['codebrain.prReview', prReviewCommand],
+
+    // Group & Context commands
+    ['codebrain.repoMenu', (...args) => repoMenuCommand(context, args[0] as string | { meta?: Record<string, string> } | undefined)],
+    ['codebrain.selectRepo', (...args) => selectRepoCommand(context, args[0] as string | { meta?: Record<string, string> } | undefined)],
+    ['codebrain.selectGroup', (...args) => selectGroupCommand(context, args[0] as string | { meta?: Record<string, string> } | undefined)],
+    ['codebrain.createGroup', createGroupCommand],
+    ['codebrain.syncGroup', syncGroupCommand],
+    ['codebrain.addRepoToGroup', addRepoToGroupCommand],
+    ['codebrain.removeRepoFromGroup', removeRepoFromGroupCommand],
+    ['codebrain.clearContext', () => clearActivationCommand(context)],
+    ['codebrain.showContext', () => showActiveContextCommand(context)],
 
     [
-      'gitnexus.addMcpConfig',
-      () => writeMcpConfigWithFeedback(getWorkspaceRoot()),
-    ],
-
-    [
-      'gitnexus.refreshTreeView',
+      'codebrain.refreshTreeView',
       () => {
         quickActionsProvider.refresh();
         agentsProvider.refresh();
-        void staleness.forceCheck();
+        groupsReposProvider.refresh();
+        statusBar.refreshContext();
+        if (staleness) {
+          void staleness.forceCheck();
+        }
       },
     ],
   ];
 
   for (const [id, handler] of cmds) {
     context.subscriptions.push(
-      vscode.commands.registerCommand(id, handler),
+      vscode.commands.registerCommand(id, (...args: any[]) => handler(...args)),
     );
   }
 
-  // Startup project health check: MCP presence
+  // ----------------------------------------------------------------
+  // Startup initialization (fire-and-forget)
+  // ----------------------------------------------------------------
+  // Startup project health check: MCP presence + auto-setup + auto-start server
   void runStartupHealthCheck(getWorkspaceRoot());
-
-  // Auto-start gitnexus bridge server
-  void autoStartGitnexusServer(getWorkspaceRoot());
 }
 
 export function deactivate(): void {

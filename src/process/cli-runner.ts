@@ -1,16 +1,8 @@
-import * as vscode from 'vscode';
-import { execFile, execFileSync } from 'child_process';
-import { promisify } from 'util';
-import * as fs from 'fs';
-import * as path from 'path';
-import { ensureRuntimeDependencies } from './runtime-init.js';
-
-const execFileAsync = promisify(execFile);
-
-export interface CliEntry {
-  command: string;
-  args: string[];
-}
+﻿import * as vscode from "vscode";
+import { execFile, execFileSync, spawn } from "child_process";
+import { promisify } from "util";
+import * as fs from "fs";
+import * as path from "path";
 
 export interface CliRunResult {
   stdout: string;
@@ -18,88 +10,137 @@ export interface CliRunResult {
   exitCode: number;
 }
 
-function uniquePaths(paths: Array<string | undefined>): string[] {
-  return Array.from(new Set(paths.filter((p): p is string => typeof p === 'string' && p.length > 0)));
-}
-
 let _outputChannel: vscode.OutputChannel | undefined;
+let _extensionStorageRoot: string | undefined;
+let _cliInstallPromise: Thenable<boolean> | undefined;
+
+const CLI_PACKAGE_NAME = "@xuansang2770/gitnexus";
+const CLI_INSTALL_FOLDER = "gitnexus-cli";
+const CLI_SETUP_STATE_FILE = ".codebrain-cli-setup-done";
 
 export function getOutputChannel(): vscode.OutputChannel {
   if (!_outputChannel) {
-    _outputChannel = vscode.window.createOutputChannel('GitNexus');
+    _outputChannel = vscode.window.createOutputChannel("CodeBrain");
   }
   return _outputChannel;
 }
 
-/** Resolve the gitnexus binary path from PATH, returns null if not found.
- *  On Windows, `where` returns the .cmd shim — we keep that path but mark it
- *  so callers know to use shell:true (or cmd /c) when spawning.
- */
-export function resolveGitnexusBin(): string | null {
+export function initializeCodeBrainRuntime(storageRoot: string): void {
+  _extensionStorageRoot = storageRoot;
+}
+
+export function getSetupStateMarkerPath(): string {
+  return path.join(getCliInstallRoot(), CLI_SETUP_STATE_FILE);
+}
+
+function getCliInstallRoot(): string {
+  if (_extensionStorageRoot) {
+    return path.join(_extensionStorageRoot, CLI_INSTALL_FOLDER);
+  }
+  const extensionRoot = path.resolve(__dirname, "..", "..");
+  return path.join(extensionRoot, "runtime", "gitnexus");
+}
+
+function ensureCliInstallRoot(): void {
+  fs.mkdirSync(getCliInstallRoot(), { recursive: true });
+}
+
+function getInstalledPackageJsonPath(): string {
+  return path.join(
+    getCliInstallRoot(),
+    "node_modules",
+    "@xuansang2770",
+    "gitnexus",
+    "package.json",
+  );
+}
+
+export function getInstalledCliPath(): string | null {
+  const installRoot = getCliInstallRoot();
+  const candidates = [
+    path.join(
+      installRoot,
+      "node_modules",
+      "@xuansang2770",
+      "gitnexus",
+      "dist",
+      "cli",
+      "index.js",
+    ),
+    path.join(
+      installRoot,
+      "node_modules",
+      "@xuansang2770",
+      "gitnexus",
+      "dist",
+      "index.js",
+    ),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function getInstalledCliVersion(): string | null {
+  const pkgPath = getInstalledPackageJsonPath();
+  if (!fs.existsSync(pkgPath)) {
+    return null;
+  }
   try {
-    const cmd = process.platform === 'win32' ? 'where' : 'which';
-    const result = execFileSync(cmd, ['gitnexus'], {
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    // `where` can return multiple lines; take first non-empty
-    const bin = result
-      .split('\n')
-      .map((l) => l.trim())
-      .find((l) => l.length > 0);
-    return bin ?? null;
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as {
+      version?: string;
+    };
+    return pkg.version ?? null;
   } catch {
     return null;
   }
 }
 
-/** Resolve local built CLI path when developing in a monorepo/workspace. */
-export function resolveLocalGitnexusCliPath(baseDir?: string): string | null {
-  // Walk up from __dirname (src/process) to the extension root
-  const extensionRoot = baseDir ?? path.resolve(__dirname, '..', '..');
-  const localCli = path.join(extensionRoot, 'GitNexus', 'gitnexus', 'dist', 'cli', 'index.js');
-  return fs.existsSync(localCli) ? localCli : null;
-}
+async function getLatestCliVersion(npm: string): Promise<string | null> {
+  const execFileAsync = promisify(execFile);
+  try {
+    const command = process.platform === "win32" ? "cmd" : npm;
+    const args =
+      process.platform === "win32"
+        ? ["/c", npm, "view", CLI_PACKAGE_NAME, "version", "--json"]
+        : ["view", CLI_PACKAGE_NAME, "version", "--json"];
 
-export function resolveBundledGitnexusCliPath(baseDir?: string): string | null {
-  const extensionRoot = baseDir ?? path.resolve(__dirname, '..', '..');
-  const runtimeRoot = path.join(extensionRoot, 'runtime', 'gitnexus');
-  const bundledCli = path.join(runtimeRoot, 'dist', 'cli', 'index.js');
-  console.log(`Resolving bundled CLI at ${bundledCli}`);
-  return fs.existsSync(bundledCli) ? bundledCli : null;
-}
-
-function resolvePreferredLocalCliPath(baseDir?: string): string | null {
-  return resolveBundledGitnexusCliPath(baseDir) ?? resolveLocalGitnexusCliPath(baseDir);
-}
-
-/**
- * Resolve an MCP entry for VS Code mcp.json.
- * Runtime-only: use bundled CLI inside extension package.
- */
-export function resolveMcpEntry(baseDir?: string): CliEntry {
-  const bundledCli = resolveBundledGitnexusCliPath(baseDir);
-  if (!bundledCli) {
-    throw new Error('GitNexus bundled runtime CLI not found. Reinstall extension package or run npm run build && npm run package.');
+    const { stdout } = await execFileAsync(command, args, {
+      cwd: getCliInstallRoot(),
+      windowsHide: true,
+      timeout: 15000,
+      maxBuffer: 1024 * 1024,
+    });
+    const parsed = JSON.parse(stdout.trim()) as string;
+    return typeof parsed === "string" ? parsed : null;
+  } catch {
+    return null;
   }
-  return { command: 'node', args: [bundledCli, 'mcp'] };
 }
 
+/** Resolve the codebrain binary path from PATH, returns null if not found.
+ *  On Windows, `where` returns the .cmd shim â€” we keep that path but mark it
+ *  so callers know to use shell:true (or cmd /c) when spawning.
+ */
+
 /**
- * Build the spawn descriptor for running gitnexus.
- * On Windows, .cmd shims cannot be spawned with shell:false — wrap via cmd /c.
+ * Build the spawn descriptor for running codebrain.
+ * On Windows, .cmd shims cannot be spawned with shell:false â€” wrap via cmd /c.
  */
 function buildSpawnDescriptor(args: string[]): {
   command: string;
   args: string[];
   shell: boolean;
 } {
-  const localCli = resolvePreferredLocalCliPath();
+  const localCli = getInstalledCliPath();
   if (!localCli) {
-    throw new Error('GitNexus local CLI is unavailable (runtime dependencies may have failed to install). Run: npm run build, then retry.');
+    throw new Error("CodeBrain CLI not found. Run CodeBrain: Setup first.");
   }
-  return { command: 'node', args: [localCli, ...args], shell: false };
+  return { command: "node", args: [localCli, ...args], shell: false };
 }
 
 function quoteForShell(arg: string): string {
@@ -110,25 +151,25 @@ function quoteForShell(arg: string): string {
 }
 
 /**
- * Build a shell command line using the same resolver strategy as runGitnexus.
+ * Build a shell command line using the same resolver strategy as runCodeBrain.
  * Useful for long-running commands that need to run in a VS Code terminal.
  */
-export function buildGitnexusTerminalCommand(args: string[]): string {
+export function buildCodeBrainTerminalCommand(args: string[]): string {
   const descriptor = buildSpawnDescriptor(args);
-  return [descriptor.command, ...descriptor.args].map(quoteForShell).join(' ');
+  return [descriptor.command, ...descriptor.args].map(quoteForShell).join(" ");
 }
 
 /** Check if npm is available; returns the resolved path or 'npm' for use with cmd /c */
 export function resolveNpmBin(): string | null {
   try {
-    const cmd = process.platform === 'win32' ? 'where' : 'which';
-    const result = execFileSync(cmd, ['npm'], {
-      encoding: 'utf-8',
+    const cmd = process.platform === "win32" ? "where" : "which";
+    const result = execFileSync(cmd, ["npm"], {
+      encoding: "utf-8",
       timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ["ignore", "pipe", "ignore"],
     });
     const bin = result
-      .split('\n')
+      .split("\n")
       .map((l) => l.trim())
       .find((l) => l.length > 0);
     return bin ?? null;
@@ -140,10 +181,10 @@ export function resolveNpmBin(): string | null {
 /** Check if node is available and meets minimum version */
 export function resolveNodeVersion(): string | null {
   try {
-    const result = execFileSync('node', ['--version'], {
-      encoding: 'utf-8',
+    const result = execFileSync("node", ["--version"], {
+      encoding: "utf-8",
       timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ["ignore", "pipe", "ignore"],
     });
     return result.trim();
   } catch {
@@ -165,22 +206,17 @@ export interface SpawnOptions {
  * Run a gitnexus CLI command.
  * Streams stdout/stderr to the Output Channel in real time.
  */
-export async function runGitnexus(
+export async function runCodeBrain(
   args: string[],
   opts: SpawnOptions = {},
 ): Promise<CliRunResult> {
   const channel = getOutputChannel();
-  const extensionRoot = path.resolve(__dirname, '..', '..');
-  const runtimeReady = await ensureRuntimeDependencies(extensionRoot, {
-    showProgress: true,
-    outputChannel: channel,
-  });
-
-  if (!runtimeReady && !resolveLocalGitnexusCliPath(extensionRoot)) {
-    const message = 'GitNexus runtime dependency install failed. Check Output panel and run npm run build if needed.';
-    channel.appendLine(`\n$ gitnexus ${args.join(' ')}`);
+  const ready = await ensureCodeBrainCliInstalled(opts.token);
+  if (!ready) {
+    const message = "CodeBrain CLI install/update failed.";
+    channel.appendLine(`\n$ codebrain ${args.join(" ")}`);
     channel.appendLine(`[process error: ${message}]`);
-    return { stdout: '', stderr: message, exitCode: 1 };
+    return { stdout: "", stderr: message, exitCode: 1 };
   }
 
   let descriptor;
@@ -188,29 +224,32 @@ export async function runGitnexus(
     descriptor = buildSpawnDescriptor(args);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    channel.appendLine(`\n$ gitnexus ${args.join(' ')}`);
+    channel.appendLine(`\n$ codebrain ${args.join(" ")}`);
     channel.appendLine(`[process error: ${message}]`);
-    return { stdout: '', stderr: message, exitCode: 1 };
+    return { stdout: "", stderr: message, exitCode: 1 };
   }
   const cwd = opts.cwd ?? getWorkspaceRoot();
   const env = { ...process.env, ...(opts.env ?? {}) };
 
-  channel.appendLine(`\n$ gitnexus ${args.join(' ')}`);
+  channel.appendLine(`\n$ codebrain ${args.join(" ")}`);
   channel.appendLine(`  cwd: ${cwd}`);
-  channel.appendLine(`  exec: ${descriptor.command} ${descriptor.args.join(' ')}`);
+  channel.appendLine(
+    `  exec: ${descriptor.command} ${descriptor.args.join(" ")}`,
+  );
 
   return new Promise<CliRunResult>((resolve) => {
-    const { spawn } = require('child_process') as typeof import('child_process');
+    const { spawn } =
+      require("child_process") as typeof import("child_process");
     const proc = spawn(descriptor.command, descriptor.args, {
       cwd,
       env,
       shell: descriptor.shell,
     });
 
-    let stdout = '';
-    let stderr = '';
+    let stdout = "";
+    let stderr = "";
 
-    proc.stdout?.on('data', (chunk: Buffer) => {
+    proc.stdout?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stdout += text;
       if (opts.stream !== false) {
@@ -218,7 +257,7 @@ export async function runGitnexus(
       }
     });
 
-    proc.stderr?.on('data', (chunk: Buffer) => {
+    proc.stderr?.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stderr += text;
       if (opts.stream !== false) {
@@ -227,16 +266,16 @@ export async function runGitnexus(
     });
 
     opts.token?.onCancellationRequested(() => {
-      proc.kill('SIGTERM');
+      proc.kill("SIGTERM");
     });
 
-    proc.on('close', (code) => {
+    proc.on("close", (code) => {
       const exitCode = code ?? 1;
       channel.appendLine(`\n[gitnexus exited: ${exitCode}]`);
       resolve({ stdout, stderr, exitCode });
     });
 
-    proc.on('error', (err) => {
+    proc.on("error", (err) => {
       channel.appendLine(`\n[process error: ${err.message}]`);
       resolve({ stdout, stderr, exitCode: 1 });
     });
@@ -246,47 +285,180 @@ export async function runGitnexus(
 /**
  * Run npm install -g gitnexus and stream output.
  */
-export async function installGitnexusCli(token?: vscode.CancellationToken): Promise<boolean> {
+export async function installCodeBrainCli(
+  token?: vscode.CancellationToken,
+): Promise<boolean> {
   const channel = getOutputChannel();
   channel.show(true);
-  channel.appendLine('\n$ npm install -g gitnexus  (installing GitNexus CLI globally)');
+  channel.appendLine(`\n$ Installing CodeBrain CLI...`);
 
   const npm = resolveNpmBin();
   if (!npm) {
-    channel.appendLine('[ERROR] npm not found. Please install Node.js first.');
+    channel.appendLine("[ERROR] npm not found. Please install Node.js first.");
     return false;
   }
 
-  // On Windows, npm is a .cmd shim — must use cmd /c
-  const spawnCmd = process.platform === 'win32' ? 'cmd' : npm;
-  const spawnArgs =
-    process.platform === 'win32'
-      ? ['/c', npm, 'install', '-g', 'gitnexus']
-      : ['install', '-g', 'gitnexus'];
+  ensureCliInstallRoot();
+  const installRoot = getCliInstallRoot();
+  const packageJsonPath = path.join(installRoot, "package.json");
+  const npmCmd = process.platform === "win32" ? "cmd" : npm;
+  const npmInitArgs =
+    process.platform === "win32" ? ["/c", npm, "init", "-y"] : ["init", "-y"];
+  const npmInstallArgs =
+    process.platform === "win32"
+      ? [
+          "/c",
+          npm,
+          "install",
+          "--no-save",
+          "--no-audit",
+          "--no-fund",
+          `${CLI_PACKAGE_NAME}@latest`,
+        ]
+      : [
+          "install",
+          "--no-save",
+          "--no-audit",
+          "--no-fund",
+          `${CLI_PACKAGE_NAME}@latest`,
+        ];
+  if (!fs.existsSync(packageJsonPath)) {
+    // Step 1: Always run 'npm init -y'
+    try {
+      await runCommand(npmCmd, npmInitArgs, installRoot, channel, token);
+    } catch (err) {
+      channel.appendLine(
+        `[ERROR] npm init -y failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
+  }
 
-  return new Promise<boolean>((resolve) => {
-    const { spawn } = require('child_process') as typeof import('child_process');
-    const proc = spawn(spawnCmd, spawnArgs, {
+  // Step 2: Run npm install
+  try {
+    await runCommand(npmCmd, npmInstallArgs, installRoot, channel, token);
+    const ok = Boolean(getInstalledCliPath());
+    channel.appendLine(
+      ok
+        ? "\n[CodeBrain CLI installed successfully]"
+        : "\n[install failed: CLI not found after install]",
+    );
+    return ok;
+  } catch (err) {
+    channel.appendLine(
+      `[ERROR] npm install failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+// Helper: run a command with async/await
+async function runCommand(
+  cmd: string,
+  args: string[],
+  cwd: string,
+  channel: vscode.OutputChannel,
+  token?: vscode.CancellationToken,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const proc = spawn(cmd, args, {
+      cwd,
       env: process.env,
       shell: false,
     });
 
-    proc.stdout?.on('data', (chunk: Buffer) => channel.append(chunk.toString()));
-    proc.stderr?.on('data', (chunk: Buffer) => channel.append(chunk.toString()));
+    proc.stdout?.on("data", (chunk: Buffer) =>
+      channel.append(chunk.toString()),
+    );
+    proc.stderr?.on("data", (chunk: Buffer) =>
+      channel.append(chunk.toString()),
+    );
 
-    token?.onCancellationRequested(() => proc.kill('SIGTERM'));
-
-    proc.on('close', (code) => {
-      const ok = code === 0;
-      channel.appendLine(ok ? '\n[GitNexus CLI installed successfully]' : `\n[install failed: exit ${code}]`);
-      resolve(ok);
+    token?.onCancellationRequested(() => {
+      try {
+        proc.kill();
+      } catch {}
     });
 
-    proc.on('error', (err) => {
-      channel.appendLine(`\n[npm error: ${err.message}]`);
-      resolve(false);
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Process exited with code ${code}`));
+      }
     });
+
+    proc.on("error", (err) => reject(err));
   });
+}
+
+export async function ensureCodeBrainCliInstalled(
+  token?: vscode.CancellationToken,
+): Promise<boolean> {
+  const channel = getOutputChannel();
+  const npm = resolveNpmBin();
+  if (!npm) {
+    return false;
+  }
+
+  ensureCliInstallRoot();
+
+  const installedCli = getInstalledCliPath();
+  if (!installedCli) {
+    // CLI not installed - check if installation is already in progress
+    if (_cliInstallPromise) {
+      return _cliInstallPromise;
+    }
+
+    // Start new installation and cache the promise
+    const installPromise = vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "CodeBrain: Installing CLI...",
+        cancellable: false,
+      },
+      () => installCodeBrainCli(token),
+    );
+    _cliInstallPromise = installPromise;
+
+    const result = await installPromise;
+    _cliInstallPromise = undefined; // Clear cache after install completes
+    return result;
+  }
+
+  const current = getInstalledCliVersion();
+  const latest = await getLatestCliVersion(npm);
+  if (!current || !latest) {
+    return true;
+  }
+
+  if (current !== latest) {
+    channel.appendLine(
+      `[CodeBrain] Updating CLI from ${current} to ${latest}...`,
+    );
+
+    // Check if update is already in progress
+    if (_cliInstallPromise) {
+      return _cliInstallPromise;
+    }
+
+    // Start new update and cache the promise
+    const updatePromise = vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `CodeBrain: Updating CLI ${current} → ${latest}...`,
+        cancellable: false,
+      },
+      () => installCodeBrainCli(token),
+    );
+    _cliInstallPromise = updatePromise;
+
+    const result = await updatePromise;
+    _cliInstallPromise = undefined; // Clear cache after update completes
+    return result;
+  }
+
+  return true;
 }
 
 /** Return the first workspace folder root, or process.cwd(). */

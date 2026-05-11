@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { runGitnexus, getWorkspaceRoot } from '../process/cli-runner.js';
-import { GitNexusStatusBar, IndexState } from '../ui/status-bar.js';
+import { runCodeBrain, getWorkspaceRoot } from '../process/cli-runner.js';
+import { CodeBrainStatusBar, IndexState } from '../ui/status-bar.js';
 import { analyzeCommand } from '../commands/analyze.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -45,23 +45,27 @@ export class StalenessMonitor implements vscode.Disposable {
   private _autoIndexRunning = false;
   private _autoIndexDebounce: NodeJS.Timeout | undefined;
 
-  constructor(private readonly _statusBar: GitNexusStatusBar) {}
+  constructor(private readonly _statusBar: CodeBrainStatusBar) {}
 
   start(): void {
-    const config = vscode.workspace.getConfiguration('gitnexus');
-    const intervalSec = config.get<number>('stalenessCheckIntervalSeconds', 60);
+    const config = vscode.workspace.getConfiguration('codebrain');
+    const intervalSec = config.get<number>('stalenessCheckIntervalSeconds', 0);
 
-    // First check immediately
+    // First check immediately (status + optional setup prompt)
     void this._check(true);
 
-    this._timer = setInterval(() => {
-      void this._check(true);
-    }, intervalSec * 1000);
+    // Periodic re-index based on configured interval.
+    // 0 or negative value means disabled.
+    if (intervalSec > 0) {
+      this._timer = setInterval(() => {
+        void this._periodicReindexTick();
+      }, intervalSec * 1000);
+    }
 
     // Re-check on config change
     this._disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('gitnexus.stalenessCheckIntervalSeconds')) {
+        if (e.affectsConfiguration('codebrain.stalenessCheckIntervalSeconds')) {
           this.stop();
           this.start();
         }
@@ -104,7 +108,7 @@ export class StalenessMonitor implements vscode.Disposable {
       return state;
     }
 
-    const config = vscode.workspace.getConfiguration('gitnexus');
+    const config = vscode.workspace.getConfiguration('codebrain');
 
     if (state === 'not-indexed' && config.get<boolean>('autoSetupOnOpen', true)) {
       void this._offerSetup();
@@ -118,6 +122,19 @@ export class StalenessMonitor implements vscode.Disposable {
   }
 
   private _setupOffered = false;
+
+  private async _periodicReindexTick(): Promise<void> {
+    if (this._autoIndexRunning) {
+      return;
+    }
+
+    const state = await this._check(true);
+    if (state === 'not-indexed' || state === 'error') {
+      return;
+    }
+
+    await this._runAutoReindex();
+  }
 
   private _attachGitHeadListeners(): void {
     const gitExt = vscode.extensions.getExtension<GitExtension>('vscode.git');
@@ -186,7 +203,7 @@ export class StalenessMonitor implements vscode.Disposable {
     // Always refresh status quickly when HEAD changes.
     void this._check(true);
 
-    const config = vscode.workspace.getConfiguration('gitnexus');
+    const config = vscode.workspace.getConfiguration('codebrain');
     if (!config.get<boolean>('autoIndex.onBranchChange', false)) {
       return;
     }
@@ -213,13 +230,17 @@ export class StalenessMonitor implements vscode.Disposable {
       return;
     }
 
+    const state = await this._check(false);
+    if (state !== 'stale') {
+      return;
+    }
+
+    await this._runAutoReindex();
+  }
+
+  private async _runAutoReindex(): Promise<void> {
     this._autoIndexRunning = true;
     try {
-      const state = await this._check(false);
-      if (state !== 'stale') {
-        return;
-      }
-
       const useEmbeddings = this._hadEmbeddingsBefore();
       this._statusBar.setState('indexing');
       await analyzeCommand({
@@ -258,7 +279,7 @@ export class StalenessMonitor implements vscode.Disposable {
       'Not Now',
     );
     if (choice === 'Setup Now') {
-      await vscode.commands.executeCommand('gitnexus.setup');
+      await vscode.commands.executeCommand('codebrain.setup');
     }
   }
 
@@ -271,7 +292,7 @@ export class StalenessMonitor implements vscode.Disposable {
 /** Parse `gitnexus status` output to derive IndexState */
 export async function detectIndexState(): Promise<IndexState> {
   try {
-    const result = await runGitnexus(['status'], {
+    const result = await runCodeBrain(['status'], {
       cwd: getWorkspaceRoot(),
       stream: false,
     });

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { getActiveContext, type ContextType } from '../process/group-context.js';
 
 export type IndexState = 'unknown' | 'indexing' | 'fresh' | 'stale' | 'not-indexed' | 'error';
 
@@ -12,52 +13,83 @@ interface StatusBarConfig {
 
 const STATE_CONFIG: Record<IndexState, StatusBarConfig> = {
   unknown: {
-    text: '$(graph-line) GitNexus',
-    tooltip: 'GitNexus: checking status…',
-    command: 'gitnexus.status',
+    text: '$(graph-line) CodeBrain',
+    tooltip: 'CodeBrain: checking status…',
+    command: 'codebrain.status',
   },
   indexing: {
-    text: '$(sync~spin) GitNexus: Indexing…',
-    tooltip: 'GitNexus: Indexing in progress',
-    command: 'gitnexus.status',
+    text: '$(sync~spin) CodeBrain: Indexing…',
+    tooltip: 'CodeBrain: Indexing in progress',
+    command: 'codebrain.status',
   },
   fresh: {
-    text: '$(graph-line) GitNexus: Fresh',
-    tooltip: 'GitNexus: Index is up to date. Click to view status.',
-    command: 'gitnexus.status',
+    text: '$(graph-line) CodeBrain: Fresh',
+    tooltip: 'CodeBrain: Index is up to date. Click to view status.',
+    command: 'codebrain.status',
   },
   stale: {
-    text: '$(warning) GitNexus: Stale',
-    tooltip: 'GitNexus: Index is behind HEAD. Click to re-index.',
+    text: '$(warning) CodeBrain: Stale',
+    tooltip: 'CodeBrain: Index is behind HEAD. Click to re-index.',
     backgroundColor: new vscode.ThemeColor('statusBarItem.warningBackground'),
-    command: 'gitnexus.analyze',
+    command: 'codebrain.analyze',
   },
   'not-indexed': {
-    text: '$(circle-slash) GitNexus: Not indexed',
-    tooltip: 'GitNexus: This repo has not been indexed yet. Click to set up.',
+    text: '$(circle-slash) CodeBrain: Not indexed',
+    tooltip: 'CodeBrain: This repo has not been indexed yet. Click to set up.',
     backgroundColor: new vscode.ThemeColor('statusBarItem.errorBackground'),
-    command: 'gitnexus.setup',
+    command: 'codebrain.setup',
   },
   error: {
-    text: '$(error) GitNexus: Error',
-    tooltip: 'GitNexus: Failed to read index status. Check Output panel.',
+    text: '$(error) CodeBrain: Error',
+    tooltip: 'CodeBrain: Failed to read index status. Check Output panel.',
     backgroundColor: new vscode.ThemeColor('statusBarItem.errorBackground'),
-    command: 'gitnexus.status',
+    command: 'codebrain.status',
   },
 };
 
-export class GitNexusStatusBar implements vscode.Disposable {
+export class CodeBrainStatusBar implements vscode.Disposable {
   private readonly _item: vscode.StatusBarItem;
+  private readonly _contextItem: vscode.StatusBarItem;
+  private _storage?: vscode.Memento;
 
-  constructor() {
+  constructor(storage?: vscode.Memento) {
+    this._storage = storage;
     this._item = vscode.window.createStatusBarItem(
-      'gitnexus.status',
+      'codebrain.status',
       vscode.StatusBarAlignment.Left,
       100,
     );
-    this._item.name = 'GitNexus';
+    this._item.name = 'CodeBrain';
     this.setState('unknown');
     this._item.show();
+
+    this._contextItem = vscode.window.createStatusBarItem(
+      'codebrain.context',
+      vscode.StatusBarAlignment.Left,
+      99,
+    );
+    this._contextItem.name = 'CodeBrain Context';
+    this._updateContextDisplay();
+    this._contextItem.show();
+  }
+
+  private _updateContextDisplay(): void {
+    if (!this._storage) {
+      this._contextItem.hide();
+      return;
+    }
+
+    const activeContext = getActiveContext(this._storage);
+    if (!activeContext) {
+      this._contextItem.hide();
+      return;
+    }
+
+    const typeIcon = activeContext.type === 'repo' ? '$(repo)' : '$(server)';
+    this._contextItem.text = `${typeIcon} ${activeContext.type === 'repo' ? 'Repo' : 'Group'}: ${activeContext.name}`;
+    this._contextItem.tooltip = `Active ${activeContext.type === 'repo' ? 'Repository' : 'Group'}: ${activeContext.name}\nClick to change`;
+    this._contextItem.command = 'codebrain.showContext';
+    this._contextItem.show();
   }
 
   setState(state: IndexState): void {
@@ -69,7 +101,12 @@ export class GitNexusStatusBar implements vscode.Disposable {
     this._item.command = cfg.command;
   }
 
+  refreshContext(): void {
+    this._updateContextDisplay();
+  }
+
   dispose(): void {
     this._item.dispose();
+    this._contextItem.dispose();
   }
 }

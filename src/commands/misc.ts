@@ -1,13 +1,14 @@
-import * as vscode from 'vscode';
+﻿import * as vscode from 'vscode';
 import { execFileSync } from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ensureGitnexusCli } from '../process/prerequisites.js';
-import { runGitnexus, getOutputChannel, getWorkspaceRoot, buildGitnexusTerminalCommand } from '../process/cli-runner.js';
+import { ensureCodeBrainCli } from '../process/prerequisites.js';
+import { runCodeBrain, getOutputChannel, getWorkspaceRoot, buildCodeBrainTerminalCommand } from '../process/cli-runner.js';
+import { getActiveRepoPath } from '../process/group-context.js';
 
-export async function queryCommand(): Promise<void> {
-  const ok = await ensureGitnexusCli();
+export async function queryCommand(context?: vscode.ExtensionContext): Promise<void> {
+  const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
@@ -18,7 +19,7 @@ export async function queryCommand(): Promise<void> {
 
   const query = await vscode.window.showInputBox({
     placeHolder: 'e.g. auth token validation flow',
-    prompt: 'GitNexus: Search the knowledge graph',
+    prompt: 'CodeBrain: Search the knowledge graph',
     value: selected,
   });
   if (!query) {
@@ -28,16 +29,18 @@ export async function queryCommand(): Promise<void> {
   const channel = getOutputChannel();
   channel.show(true);
 
+  const cwd = context ? (await getActiveRepoPath(context.globalState)) ?? getWorkspaceRoot() : getWorkspaceRoot();
+
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'GitNexus: Querying graph…', cancellable: false },
+    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Querying...', cancellable: false },
     async () => {
-      await runGitnexus(['query', query, '--limit', '5'], { cwd: getWorkspaceRoot() });
+      await runCodeBrain(['query', query, '--limit', '5'], { cwd });
     },
   );
 }
 
 export async function wikiCommand(): Promise<void> {
-  const ok = await ensureGitnexusCli();
+  const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
@@ -47,7 +50,7 @@ export async function wikiCommand(): Promise<void> {
 
   const model = await vscode.window.showInputBox({
     placeHolder: 'gpt-4o-mini',
-    prompt: 'GitNexus Wiki: LLM model to use (leave blank for default)',
+    prompt: 'CodeBrain Wiki: LLM model to use (leave blank for default)',
     value: '',
   });
 
@@ -57,13 +60,13 @@ export async function wikiCommand(): Promise<void> {
   }
 
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'GitNexus: Generating wiki…', cancellable: true },
+    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Generating wiki...', cancellable: true },
     async (_progress, token) => {
-      const result = await runGitnexus(args, { cwd: getWorkspaceRoot(), token });
+      const result = await runCodeBrain(args, { cwd: getWorkspaceRoot(), token });
       if (result.exitCode === 0) {
-        vscode.window.showInformationMessage('GitNexus: Wiki generated successfully.');
+        vscode.window.showInformationMessage('CodeBrain: Wiki generated successfully.');
       } else if (!token.isCancellationRequested) {
-        vscode.window.showErrorMessage('GitNexus: Wiki generation failed. Check Output panel.');
+        vscode.window.showErrorMessage('CodeBrain: Wiki generation failed. Check Output panel.');
       }
     },
   );
@@ -72,14 +75,14 @@ export async function wikiCommand(): Promise<void> {
 let _serveTerminal: vscode.Terminal | undefined;
 
 export async function serveCommand(): Promise<void> {
-  const ok = await ensureGitnexusCli();
+  const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
 
   if (_serveTerminal && !_serveTerminal.exitStatus) {
     const choice = await vscode.window.showWarningMessage(
-      'GitNexus: Bridge server is already running.',
+      'CodeBrain: Bridge server is already running.',
       'Show Terminal',
       'Restart',
     );
@@ -91,15 +94,15 @@ export async function serveCommand(): Promise<void> {
   }
 
   _serveTerminal = vscode.window.createTerminal({
-    name: 'GitNexus Bridge',
+    name: 'CodeBrain Bridge',
     cwd: getWorkspaceRoot(),
     shellPath: process.platform === 'win32' ? 'cmd.exe' : undefined,
   });
   _serveTerminal.show();
-  _serveTerminal.sendText(buildGitnexusTerminalCommand(['serve']));
+  _serveTerminal.sendText(buildCodeBrainTerminalCommand(['serve']));
 
   vscode.window.showInformationMessage(
-    'GitNexus: Bridge server starting on http://127.0.0.1:4747',
+    'CodeBrain: Bridge server starting on http://127.0.0.1:4747',
     'Open Web UI',
   ).then((c) => {
     if (c === 'Open Web UI') {
@@ -109,7 +112,7 @@ export async function serveCommand(): Promise<void> {
 }
 
 export async function prReviewCommand(): Promise<void> {
-  const ok = await ensureGitnexusCli();
+  const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
@@ -119,14 +122,14 @@ export async function prReviewCommand(): Promise<void> {
   const workspaceRoot = getWorkspaceRoot();
 
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'GitNexus: Preparing PR review context…', cancellable: true },
+    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Preparing PR review context...', cancellable: true },
     async (_progress, token) => {
       if (token.isCancellationRequested) {
         return;
       }
 
       // Health hint: show current index status in output panel (best-effort only).
-      await runGitnexus(['status'], { cwd: workspaceRoot, stream: true });
+      await runCodeBrain(['status'], { cwd: workspaceRoot, stream: true });
 
       const stagedFiles = getStagedFiles(workspaceRoot);
       const stagedSection =
@@ -136,13 +139,13 @@ export async function prReviewCommand(): Promise<void> {
 
       // Open Copilot chat with the reviewer agent and prefilled context
       const prompt =
-        'Run a PR review using GitNexus MCP tools.\n' +
+        'Run a PR review using CodeBrain MCP tools.\n' +
         'Workflow: 1) run detect_changes(scope: staged or compare), 2) run impact on modified symbols, 3) report findings by severity, 4) add missing tests.\n\n' +
         'Staged files:\n' +
         `${stagedSection}`;
 
       const encodedPrompt = encodeURIComponent(prompt);
-      // VS Code Copilot chat URI — opens chat with prefilled prompt
+      // VS Code Copilot chat URI â€” opens chat with prefilled prompt
       const chatUri = vscode.Uri.parse(`vscode://xpl.chat-uri/startChat?agent=gitnexus-pr-review&prompt=${encodedPrompt}`);
       await vscode.commands.executeCommand('vscode.open', chatUri);
     },
@@ -155,7 +158,7 @@ type DashboardMessage =
   | { type: 'startBridgeServer' };
 
 export async function openDashboardCommand(context: vscode.ExtensionContext): Promise<void> {
-  const ok = await ensureGitnexusCli();
+  const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
@@ -175,7 +178,7 @@ export async function openDashboardCommand(context: vscode.ExtensionContext): Pr
 
   const panel = vscode.window.createWebviewPanel(
     'gitnexus.dashboard',
-    'GitNexus Graph Dashboard',
+    'CodeBrain Graph Dashboard',
     vscode.ViewColumn.Beside,
     {
       enableScripts: true,
@@ -200,7 +203,7 @@ export async function openDashboardCommand(context: vscode.ExtensionContext): Pr
     }
 
     if (msg.type === 'startBridgeServer') {
-      void vscode.commands.executeCommand('gitnexus.serve');
+      void vscode.commands.executeCommand('codebrain.serve');
     }
   });
 
@@ -232,7 +235,7 @@ function getGitnexusWebHtml(webview: vscode.Webview, distDir: string): string {
   html = html.replace(/(src|href)=["']\/(.*?)["']/g, (_m, attr: string, assetPath: string) => {
     return `${attr}="${distUri}/${assetPath}"`;
   });
-  // Remove crossorigin attributes — webview resource URIs don't serve CORS headers,
+  // Remove crossorigin attributes â€” webview resource URIs don't serve CORS headers,
   // so crossorigin causes module scripts and stylesheets to fail to load.
   html = html.replace(/\s+crossorigin(?:=["'][^"']*["'])?/gi, '');
   // Attach nonce to all script tags so module bootstrap can run under CSP.
@@ -265,7 +268,7 @@ function getFallbackDashboardHtml(webview: vscode.Webview, nonce: string): strin
     <meta charset="UTF-8" />
     <meta http-equiv="Content-Security-Policy" content="${csp}" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GitNexus Dashboard Setup</title>
+    <title>CodeBrain Dashboard Setup</title>
     <style nonce="${nonce}">
       :root { color-scheme: light dark; }
       body {
@@ -325,13 +328,13 @@ function getFallbackDashboardHtml(webview: vscode.Webview, nonce: string): strin
   </head>
   <body>
     <div class="header">
-      <span class="title">GitNexus Graph Dashboard</span>
+      <span class="title">CodeBrain Graph Dashboard</span>
       <button id="refresh" type="button">Refresh</button>
       <button id="openExternal" class="secondary" type="button">Open in Browser</button>
     </div>
 
     <div id="fallback" class="container">
-      <h2>GitNexus Dashboard assets are unavailable</h2>
+      <h2>CodeBrain Dashboard assets are unavailable</h2>
       <div class="hint">
         The embedded dashboard build was not found in this extension package.
       </div>
@@ -340,7 +343,7 @@ function getFallbackDashboardHtml(webview: vscode.Webview, nonce: string): strin
       <button id="startBridge" type="button">Start Bridge Server</button>
     </div>
 
-    <iframe id="dashboard" src="${dashboardUrl}" title="GitNexus Graph Dashboard" class="hidden"></iframe>
+    <iframe id="dashboard" src="${dashboardUrl}" title="CodeBrain Graph Dashboard" class="hidden"></iframe>
 
     <script nonce="${nonce}">
       const vscode = acquireVsCodeApi();
@@ -400,7 +403,7 @@ function ensureBridgeServerRunning(): void {
     cwd: getWorkspaceRoot(),
     shellPath: process.platform === 'win32' ? 'cmd.exe' : undefined,
   });
-  _serveTerminal.sendText(buildGitnexusTerminalCommand(['serve']));
+  _serveTerminal.sendText(buildCodeBrainTerminalCommand(['serve']));
 }
 
 function getStagedFiles(cwd: string): string[] {

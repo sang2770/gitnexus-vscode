@@ -1,9 +1,9 @@
 {
-  "name": "gitnexus-vscode",
-  "displayName": "GitNexus",
+  "name": "codebrain-vscode",
+  "displayName": "CodeBrain",
   "description": "Graph-powered code intelligence for Copilot. Auto-setup, auto-index, MCP config, and PR review.",
   "version": "0.1.0",
-  "publisher": "gitnexus",
+  "publisher": "codebrain",
   "license": "MIT",
   "engines": {
     "vscode": "^1.99.0"
@@ -20,144 +20,183 @@
   "contributes": {
     "commands": [
       {
-        "command": "gitnexus.setup",
-        "title": "Setup GitNexus (MCP + Agents)",
-        "category": "GitNexus"
+        "command": "codebrain.setup",
+        "title": "Setup CodeBrain",
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.installCli",
-        "title": "Install GitNexus CLI",
-        "category": "GitNexus"
+        "command": "codebrain.installCli",
+        "title": "Install CodeBrain CLI",
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.analyze",
+        "command": "codebrain.analyze",
         "title": "Analyze Repo",
-        "category": "GitNexus",
+        "category": "CodeBrain",
         "icon": "$(graph-line)"
       },
       {
-        "command": "gitnexus.analyzeForce",
+        "command": "codebrain.analyzeForce",
         "title": "Force Re-index",
-        "category": "GitNexus"
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.analyzeEmbeddings",
-        "title": "Analyze with Embeddings",
-        "category": "GitNexus"
-      },
-      {
-        "command": "gitnexus.status",
+        "command": "codebrain.status",
         "title": "Show Index Status",
-        "category": "GitNexus"
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.openDashboard",
+        "command": "codebrain.openDashboard",
         "title": "Open Graph Dashboard",
-        "category": "GitNexus",
+        "category": "CodeBrain",
         "icon": "$(graph)"
       },
       {
-        "command": "gitnexus.listRepos",
+        "command": "codebrain.listRepos",
         "title": "List Indexed Repos",
-        "category": "GitNexus"
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.clean",
+        "command": "codebrain.clean",
         "title": "Clean Index",
-        "category": "GitNexus"
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.cleanAll",
+        "command": "codebrain.cleanAll",
         "title": "Clean All Indexes",
-        "category": "GitNexus"
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.serve",
+        "command": "codebrain.serve",
         "title": "Start Web UI Bridge Server",
-        "category": "GitNexus"
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.generateWiki",
+        "command": "codebrain.generateWiki",
         "title": "Generate Wiki",
-        "category": "GitNexus"
+        "category": "CodeBrain"
       },
       {
-        "command": "gitnexus.query",
+        "command": "codebrain.query",
         "title": "Query Knowledge Graph",
-        "category": "GitNexus",
+        "category": "CodeBrain",
         "icon": "$(search)"
       },
       {
-        "command": "gitnexus.prReview",
-        "title": "PR Review with GitNexus",
-        "category": "GitNexus",
+        "command": "codebrain.prReview",
+        "title": "PR Review with CodeBrain",
+        "category": "CodeBrain",
         "icon": "$(git-pull-request-review)"
       },
       {
-        "command": "gitnexus.addMcpConfig",
-        "title": "Add MCP Config to VS Code",
-        "category": "GitNexus"
+        "command": "codebrain.refreshTreeView",
+        "title": "Refresh",
+        "category": "CodeBrain",
+        "icon": "$(refresh)"
       },
       {
-        "command": "gitnexus.refreshTreeView",
-        "title": "Refresh",
-        "category": "GitNexus",
-        "icon": "$(refresh)"
+        "command": "codebrain.selectRepo",
+        "title": "Select Repository",
+        "category": "CodeBrain",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "codebrain.selectGroup",
+        "title": "Select Group",
+        "category": "CodeBrain",
+        "icon": "$(server)"
+      },
+      {
+        "command": "codebrain.createGroup",
+        "title": "Create Repository Group",
+        "category": "CodeBrain",
+        "icon": "$(add)"
+      },
+      {
+        "command": "codebrain.syncGroup",
+        "title": "Sync Group",
+        "category": "CodeBrain",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "codebrain.clearContext",
+        "title": "Clear Active Context",
+        "category": "CodeBrain"
+      },
+      {
+        "command": "codebrain.showContext",
+        "title": "Show Active Context",
+        "category": "CodeBrain"
+      },
+      {
+        "command": "codebrain.addRepoToGroup",
+        "title": "Add Repository to Group",
+        "category": "CodeBrain"
+      },
+      {
+        "command": "codebrain.removeRepoFromGroup",
+        "title": "Remove Repository from Group",
+        "category": "CodeBrain"
+      },
+      {
+        "command": "codebrain.repoMenu",
+        "title": "Repository Actions",
+        "category": "CodeBrain"
       }
     ],
     "configuration": {
-      "title": "GitNexus",
+      "title": "CodeBrain",
       "properties": {
-        "gitnexus.autoSetupOnOpen": {
+        "codebrain.autoSetupOnOpen": {
           "type": "boolean",
           "default": true,
-          "description": "Show setup banner when opening a workspace without GitNexus configured."
+          "description": "Automatically run first-time CodeBrain CLI setup on workspace open."
         },
-        "gitnexus.autoIndex.onOpen": {
+        "codebrain.autoIndex.onOpen": {
           "type": "boolean",
           "default": false,
           "description": "Automatically run analyze when opening a stale workspace."
         },
-        "gitnexus.autoIndex.onBranchChange": {
+        "codebrain.autoIndex.onBranchChange": {
           "type": "boolean",
           "default": false,
           "description": "Automatically re-index when Git HEAD changes and the index is stale."
         },
-        "gitnexus.analyze.embeddings": {
+        "codebrain.analyze.embeddings": {
           "type": "boolean",
           "default": false,
           "description": "Enable embedding generation during analyze (slower, better semantic search)."
         },
-        "gitnexus.stalenessCheckIntervalSeconds": {
+        "codebrain.stalenessCheckIntervalSeconds": {
           "type": "number",
-          "default": 60,
-          "description": "How often (seconds) to poll index staleness."
-        },
-        "gitnexus.mcp.preferGlobalBinary": {
-          "type": "boolean",
-          "default": true,
-          "description": "Prefer globally installed gitnexus binary over npx (faster MCP startup)."
+          "default": 0,
+          "description": "How often (seconds) to run automatic periodic re-index. Set 0 to disable."
         }
       }
     },
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "gitnexus",
-          "title": "GitNexus",
+          "id": "codebrain",
+          "title": "CodeBrain",
           "icon": "resources/icon-activity.svg"
         }
       ]
     },
     "views": {
-      "gitnexus": [
+      "codebrain": [
         {
-          "id": "gitnexus.quickActions",
+          "id": "codebrain.quickActions",
           "name": "Quick Actions",
           "icon": "$(zap)"
         },
         {
-          "id": "gitnexus.agents",
+          "id": "codebrain.groupsRepos",
+          "name": "Repos & Groups",
+          "icon": "$(server)"
+        },
+        {
+          "id": "codebrain.agents",
           "name": "Copilot Agents",
           "icon": "$(robot)"
         }
@@ -166,32 +205,54 @@
     "menus": {
       "view/title": [
         {
-          "command": "gitnexus.openDashboard",
-          "when": "view == gitnexus.quickActions",
+          "command": "codebrain.openDashboard",
+          "when": "view == codebrain.quickActions",
           "group": "navigation@1"
         },
         {
-          "command": "gitnexus.refreshTreeView",
-          "when": "view == gitnexus.quickActions || view == gitnexus.agents",
+          "command": "codebrain.refreshTreeView",
+          "when": "view == codebrain.quickActions || view == codebrain.agents || view == codebrain.groupsRepos",
           "group": "navigation"
         }
       ],
       "scm/title": [
         {
-          "command": "gitnexus.prReview",
-          "group": "gitnexus@1"
+          "command": "codebrain.prReview",
+          "group": "codebrain@1"
         }
       ],
       "editor/context": [
         {
-          "command": "gitnexus.query",
-          "group": "gitnexus@1",
+          "command": "codebrain.query",
+          "group": "codebrain@1",
           "when": "editorTextFocus"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codebrain.selectRepo",
+          "when": "view == codebrain.groupsRepos && viewItem == repo",
+          "group": "1_repo@1"
+        },
+        {
+          "command": "codebrain.addRepoToGroup",
+          "when": "view == codebrain.groupsRepos && viewItem == repo",
+          "group": "1_repo@2"
+        },
+        {
+          "command": "codebrain.selectGroup",
+          "when": "view == codebrain.groupsRepos && viewItem == group",
+          "group": "1_group@1"
+        },
+        {
+          "command": "codebrain.removeRepoFromGroup",
+          "when": "view == codebrain.groupsRepos && viewItem == repoInGroup",
+          "group": "1_repoInGroup@1"
         }
       ],
       "commandPalette": [
         {
-          "command": "gitnexus.refreshTreeView",
+          "command": "codebrain.refreshTreeView",
           "when": "false"
         }
       ]
@@ -212,13 +273,12 @@
     "build-icon": "node scripts/build-icon.mjs",
     "lint": "eslint src --ext ts",
     "build": "npm run build:deps && npm run build:ext",
-    "build:deps": "npm run build:shared && npm run build:gitnexus && npm run build:web && npm run bundle:cli",
+    "build:deps": "npm run build:shared && npm run build:web && npm run bundle:cli",
     "build:shared": "cd GitNexus/gitnexus-shared && npm run build",
-    "build:gitnexus": "cd GitNexus/gitnexus && npm run build",
     "build:web": "cd GitNexus/gitnexus-web && npm run build",
     "build:ext": "npm run build-icon && npm run compile",
     "bundle:cli": "node scripts/copy-cli.mjs",
-    "package": "vsce package --allow-missing-repository --skip-license --out gitnexus-vscode.vsix"
+    "package": "vsce package --allow-missing-repository --skip-license --out codebrain-vscode.vsix"
   },
   "devDependencies": {
     "@types/node": "^20.19.39",

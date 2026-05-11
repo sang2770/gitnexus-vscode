@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { hasGitNexusMcpServer, writeMcpConfig } from './mcp-config-writer.js';
-import { ensureGitnexusCli } from '../process/prerequisites.js';
-import { getWorkspaceRoot, buildGitnexusTerminalCommand } from '../process/cli-runner.js';
+import { ensureCodeBrainCli } from '../process/prerequisites.js';
+import { buildCodeBrainTerminalCommand, getSetupStateMarkerPath, runCodeBrain } from '../process/cli-runner.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 let _autoStartTerminal: vscode.Terminal | undefined;
 
@@ -12,34 +13,33 @@ export async function runStartupHealthCheck(
     return;
   }
 
-  const mcpMissing = !hasGitNexusMcpServer(workspaceRoot);
-  if (!mcpMissing) {
+  const ok = await ensureCodeBrainCli();
+  if (!ok) {
     return;
   }
 
-  const choice = await vscode.window.showInformationMessage(
-    'GitNexus: Missing MCP config in this project.',
-    'Fix MCP',
-    'Later',
-  );
-
-  if (!choice || choice === 'Later') {
+  const markerPath = getSetupStateMarkerPath();
+  if (fs.existsSync(markerPath)) {
     return;
   }
 
-  if (choice === 'Fix MCP') {
-    await writeMcpConfig(workspaceRoot);
+  const result = await runCodeBrain(['setup'], { cwd: workspaceRoot, stream: true });
+  if (result.exitCode !== 0) {
+    vscode.window.showWarningMessage('CodeBrain: Auto setup failed. Run "CodeBrain: Setup" manually.');
+    return;
   }
 
-  vscode.window.showInformationMessage('GitNexus: Project configuration check completed.');
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(markerPath, Date.now().toString(), 'utf-8');
+  vscode.window.showInformationMessage('CodeBrain: First-time setup completed automatically.');
 }
 
-export async function autoStartGitnexusServer(
+export async function autoStartCodeBrainServer(
   workspaceRoot: string,
 ): Promise<void> {
   try {
     // Check if CLI is available
-    const ok = await ensureGitnexusCli();
+    const ok = await ensureCodeBrainCli();
     if (!ok) {
       return;
     }
@@ -51,15 +51,15 @@ export async function autoStartGitnexusServer(
 
     // Create background terminal and start server silently
     _autoStartTerminal = vscode.window.createTerminal({
-      name: 'GitNexus Bridge (Auto)',
+      name: 'CodeBrain Bridge (Auto)',
       cwd: workspaceRoot,
       shellPath: process.platform === 'win32' ? 'cmd.exe' : undefined,
       isTransient: true, // Hide from terminal list by default
     });
 
-    _autoStartTerminal.sendText(buildGitnexusTerminalCommand(['serve']));
+    _autoStartTerminal.sendText(buildCodeBrainTerminalCommand(['serve']));
   } catch (error) {
     // Silently fail on auto-start to avoid disrupting user workflow
-    console.warn('GitNexus: Auto-start server failed:', error);
+    console.warn('CodeBrain: Auto-start server failed:', error);
   }
 }

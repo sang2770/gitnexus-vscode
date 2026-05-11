@@ -1,36 +1,44 @@
-import * as vscode from 'vscode';
-import { ensureGitnexusCli } from '../process/prerequisites.js';
-import { runGitnexus, getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
-import { writeMcpConfigWithFeedback } from '../config/mcp-config-writer.js';
+﻿import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import { ensureCodeBrainCli } from '../process/prerequisites.js';
+import {
+  runCodeBrain,
+  getOutputChannel,
+  getWorkspaceRoot,
+  getSetupStateMarkerPath,
+  getInstalledCliPath,
+} from '../process/cli-runner.js';
 
-/** Full one-shot setup: install/check CLI + configure MCP + agents */
+/** Full one-shot setup: install/check CLI + run gitnexus setup */
 export async function setupCommand(): Promise<void> {
   const channel = getOutputChannel();
   channel.show(true);
 
-  // Step 1 — ensure CLI
-  const cliOk = await ensureGitnexusCli();
+  // Step 1 - ensure extension-local CLI (install first time, update later)
+  const cliOk = await ensureCodeBrainCli();
   if (!cliOk) {
     return;
   }
 
   const workspaceRoot = getWorkspaceRoot();
 
-  // Step 2 — run gitnexus setup (configures Cursor/Claude Code/Codex etc.)
+  // Step 2 - run gitnexus setup (it configures MCP/agents by itself)
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'GitNexus: Configuring editors…', cancellable: false },
+    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Running CLI setup', cancellable: false },
     async () => {
-      await runGitnexus(['setup'], { cwd: workspaceRoot });
+      await runCodeBrain(['setup', '--gitnexus-bin', getInstalledCliPath() ?? ''], { cwd: workspaceRoot });
     },
   );
 
-  // Step 3 — write VS Code MCP config
-  await writeMcpConfigWithFeedback(workspaceRoot);
+  const markerPath = getSetupStateMarkerPath();
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(markerPath, Date.now().toString(), 'utf-8');
 
-  vscode.window.showInformationMessage('GitNexus: Setup complete (MCP + Agents)!');
+  vscode.window.showInformationMessage('CodeBrain: Setup complete.');
 }
 
 /** Just install / verify CLI, no other side effects */
 export async function installCliCommand(): Promise<void> {
-  await ensureGitnexusCli();
+  await ensureCodeBrainCli();
 }
