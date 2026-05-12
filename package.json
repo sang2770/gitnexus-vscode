@@ -264,6 +264,32 @@
       {
         "path": "./skills/gitnexus-pr-review/SKILL.md"
       }
+    ],
+    "chatParticipants": [
+      {
+        "id": "codebrain.gitnexus",
+        "name": "CodeBrain",
+        "description": "Code-intelligence assistant powered by CodeBrain knowledge graph. Guides you through impact analysis, refactoring, debugging, and code exploration workflows.",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "impact",
+            "description": "Run impact analysis on a symbol to assess blast radius"
+          },
+          {
+            "name": "refactor",
+            "description": "Get guided refactoring workflow"
+          },
+          {
+            "name": "debug",
+            "description": "Get guided debugging workflow"
+          },
+          {
+            "name": "explain",
+            "description": "Explore code and understand execution flows"
+          }
+        ]
+      }
     ]
   },
   "scripts": {
