@@ -1,0 +1,267 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "GitNexus", "GitNexus", "{B918B3E3-5DC4-8CA5-41CF-2D28E6F790E2}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "gitnexus", "gitnexus", "{013CBDF6-1362-BD2B-CE49-8711A8617C59}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{564A45B0-7B9D-74A4-3EFE-68825E621FF8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "fixtures", "fixtures", "{E396A1C2-6090-17DB-D1DC-41E96BF3E15E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "cross-file-binding", "cross-file-binding", "{2546E30A-0EB5-65B5-3E57-E237C614F56B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-consumer-before-provider", "csharp-consumer-before-provider", "{20C1402D-52B6-FE38-4108-B0A762137F27}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConsumerBeforeProvider", "GitNexus\gitnexus\test\fixtures\cross-file-binding\csharp-consumer-before-provider\ConsumerBeforeProvider.csproj", "{973A2D2B-228E-A470-1153-6F30BD966B10}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-cross-file", "csharp-cross-file", "{302F8B70-424F-ED9E-E24D-B298F36F55BA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CrossFile", "GitNexus\gitnexus\test\fixtures\cross-file-binding\csharp-cross-file\CrossFile.csproj", "{591D81AD-A558-C249-425B-0C56E804E040}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "lang-resolution", "lang-resolution", "{D588EA18-CAA6-9F65-BE5A-A83E1592362B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-alias-imports", "csharp-alias-imports", "{440205CE-55BD-ECA6-5242-3824EE5EFF94}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsharpAlias", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-alias-imports\CsharpAlias.csproj", "{6784C9D8-D601-BFE2-26A8-E05EC11DC93F}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-assignment-chain", "csharp-assignment-chain", "{87D38C23-6071-5535-C868-CD36F33DD526}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AssignmentChain", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-assignment-chain\AssignmentChain.csproj", "{F58BA2F3-906D-FC66-28D2-70012F01059A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-calls", "csharp-calls", "{D0391EA8-83C3-8909-FA8F-18F07F72377F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CallProj", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-calls\CallProj.csproj", "{65BA10B3-17B6-A2B9-CBEC-0F5905DADDF9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-collection-accessor", "csharp-collection-accessor", "{8F2A38F5-3CA8-5BED-9865-0AC1199F9F94}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CollectionAccessor", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-collection-accessor\CollectionAccessor.csproj", "{DE12802C-312B-5870-D36E-B66C956262CD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-foreach", "csharp-foreach", "{45A97277-E76E-104B-8719-6A3B1963F47B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ForeachProj", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-foreach\ForeachProj.csproj", "{87DDE150-3476-667E-1CF7-E9401EE78E97}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-frozen-binding-collision", "csharp-frozen-binding-collision", "{3F3B2313-7A16-3BD7-F410-34A23A5A2ACD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CsharpFrozenBindingCollision", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-frozen-binding-collision\CsharpFrozenBindingCollision.csproj", "{B7AC2A44-D3B0-B169-D969-0FFB4AE2652A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-is-pattern", "csharp-is-pattern", "{0771286D-7A63-FAEC-2963-770A221297E5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IsPatternProj", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-is-pattern\IsPatternProj.csproj", "{CC8CD398-7ADD-4850-5A8A-B1CE7DCF785F}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-large-cache-miss-resolution", "csharp-large-cache-miss-resolution", "{B7A0848B-79A9-12BE-EB42-CAB3AD3F6605}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LargeCacheMissResolution", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-large-cache-miss-resolution\LargeCacheMissResolution.csproj", "{45E9A8E1-DED5-4D38-57BD-EE856FE1C7BB}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-member-calls", "csharp-member-calls", "{EBBB07DD-FFBE-E7CA-C807-B79DC7186F9A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MemberCallProj", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-member-calls\MemberCallProj.csproj", "{430483D6-0BA5-5D6C-2993-C8677C4E08DE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-mixed-decl-chain", "csharp-mixed-decl-chain", "{AB50F6D6-B0F9-CE10-9CC9-EA59409E881F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MixedDeclChain", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-mixed-decl-chain\MixedDeclChain.csproj", "{B6EE247A-7899-6936-E50A-E79EE9A24F12}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-namespace-as-root-no-trailing-newline", "csharp-namespace-as-root-no-trailing-newline", "{07FC2AB7-4C65-3FE4-2DD5-904EBA7CD837}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NamespaceAsRootNoTrailingNewline", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-namespace-as-root-no-trailing-newline\NamespaceAsRootNoTrailingNewline.csproj", "{0522073E-9454-E95A-566D-4BD969677D00}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-null-conditional", "csharp-null-conditional", "{7F7CFCB1-AA3D-9344-6319-1633BBFD601F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NullConditional", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-null-conditional\NullConditional.csproj", "{A88C1EAF-E592-A6A1-E89B-D3ED9776AF13}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-overload-interface", "csharp-overload-interface", "{EAB4D10D-35F9-A7BA-0971-A981A2DACE1E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OverloadInterface", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-overload-interface\OverloadInterface.csproj", "{D2604F74-2586-6ABC-6FF9-CBEF9EA70B74}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-pattern-matching", "csharp-pattern-matching", "{96055A72-33B9-583D-4888-3198B66FC9C1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PatternMatchProj", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-pattern-matching\PatternMatchProj.csproj", "{317383BB-61A3-559D-C219-2379304BA266}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-receiver-resolution", "csharp-receiver-resolution", "{7E280A6A-AB95-2069-2568-34DF595038DA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReceiverProj", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-receiver-resolution\ReceiverProj.csproj", "{95F5FA66-A82F-7969-B763-81DC57760F5F}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-recursive-pattern", "csharp-recursive-pattern", "{17732C52-C352-0412-DE38-B60CCE36D0F9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RecursivePatternProj", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-recursive-pattern\RecursivePatternProj.csproj", "{15B318F4-9EA3-8DB3-7E8F-9FC7C77A289D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-return-type", "csharp-return-type", "{5806CBB2-B1D8-A6D7-C7E6-74807EBF7A69}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ReturnType", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-return-type\ReturnType.csproj", "{3C323604-229A-80B7-654D-F7B36B6A85B7}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-switch-pattern", "csharp-switch-pattern", "{89AFFC4D-DD6C-AB18-7FF0-EA42B62E06BB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SwitchPattern", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-switch-pattern\SwitchPattern.csproj", "{D2126283-D8CB-7396-9334-93486BE0A474}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-using-static", "csharp-using-static", "{064D662A-C690-18DC-6FFE-4E9C207873F3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UsingStatic", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-using-static\UsingStatic.csproj", "{00C903B2-1B8E-3340-0FB0-AE146C05201E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-var-foreach", "csharp-var-foreach", "{244273EE-1F99-D229-AD26-F4BCEF85F642}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VarForeach", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-var-foreach\VarForeach.csproj", "{2C8E25A2-F157-DCB1-BA42-B50FB52DED3E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "csharp-variadic-resolution", "csharp-variadic-resolution", "{038DAC60-9455-FD02-129D-933CF5E1D1A8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VariadicProj", "GitNexus\gitnexus\test\fixtures\lang-resolution\csharp-variadic-resolution\VariadicProj.csproj", "{6C3157B1-7993-CFAF-6270-3E370C4DBF88}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{973A2D2B-228E-A470-1153-6F30BD966B10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{973A2D2B-228E-A470-1153-6F30BD966B10}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{973A2D2B-228E-A470-1153-6F30BD966B10}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{973A2D2B-228E-A470-1153-6F30BD966B10}.Release|Any CPU.Build.0 = Release|Any CPU
+		{591D81AD-A558-C249-425B-0C56E804E040}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{591D81AD-A558-C249-425B-0C56E804E040}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{591D81AD-A558-C249-425B-0C56E804E040}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{591D81AD-A558-C249-425B-0C56E804E040}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6784C9D8-D601-BFE2-26A8-E05EC11DC93F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6784C9D8-D601-BFE2-26A8-E05EC11DC93F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6784C9D8-D601-BFE2-26A8-E05EC11DC93F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6784C9D8-D601-BFE2-26A8-E05EC11DC93F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F58BA2F3-906D-FC66-28D2-70012F01059A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F58BA2F3-906D-FC66-28D2-70012F01059A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F58BA2F3-906D-FC66-28D2-70012F01059A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F58BA2F3-906D-FC66-28D2-70012F01059A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{65BA10B3-17B6-A2B9-CBEC-0F5905DADDF9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{65BA10B3-17B6-A2B9-CBEC-0F5905DADDF9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{65BA10B3-17B6-A2B9-CBEC-0F5905DADDF9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{65BA10B3-17B6-A2B9-CBEC-0F5905DADDF9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DE12802C-312B-5870-D36E-B66C956262CD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DE12802C-312B-5870-D36E-B66C956262CD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DE12802C-312B-5870-D36E-B66C956262CD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DE12802C-312B-5870-D36E-B66C956262CD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{87DDE150-3476-667E-1CF7-E9401EE78E97}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{87DDE150-3476-667E-1CF7-E9401EE78E97}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{87DDE150-3476-667E-1CF7-E9401EE78E97}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{87DDE150-3476-667E-1CF7-E9401EE78E97}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B7AC2A44-D3B0-B169-D969-0FFB4AE2652A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B7AC2A44-D3B0-B169-D969-0FFB4AE2652A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B7AC2A44-D3B0-B169-D969-0FFB4AE2652A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B7AC2A44-D3B0-B169-D969-0FFB4AE2652A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CC8CD398-7ADD-4850-5A8A-B1CE7DCF785F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CC8CD398-7ADD-4850-5A8A-B1CE7DCF785F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CC8CD398-7ADD-4850-5A8A-B1CE7DCF785F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CC8CD398-7ADD-4850-5A8A-B1CE7DCF785F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{45E9A8E1-DED5-4D38-57BD-EE856FE1C7BB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{45E9A8E1-DED5-4D38-57BD-EE856FE1C7BB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{45E9A8E1-DED5-4D38-57BD-EE856FE1C7BB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{45E9A8E1-DED5-4D38-57BD-EE856FE1C7BB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{430483D6-0BA5-5D6C-2993-C8677C4E08DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{430483D6-0BA5-5D6C-2993-C8677C4E08DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{430483D6-0BA5-5D6C-2993-C8677C4E08DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{430483D6-0BA5-5D6C-2993-C8677C4E08DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B6EE247A-7899-6936-E50A-E79EE9A24F12}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B6EE247A-7899-6936-E50A-E79EE9A24F12}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B6EE247A-7899-6936-E50A-E79EE9A24F12}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B6EE247A-7899-6936-E50A-E79EE9A24F12}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0522073E-9454-E95A-566D-4BD969677D00}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0522073E-9454-E95A-566D-4BD969677D00}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0522073E-9454-E95A-566D-4BD969677D00}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0522073E-9454-E95A-566D-4BD969677D00}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A88C1EAF-E592-A6A1-E89B-D3ED9776AF13}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A88C1EAF-E592-A6A1-E89B-D3ED9776AF13}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A88C1EAF-E592-A6A1-E89B-D3ED9776AF13}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A88C1EAF-E592-A6A1-E89B-D3ED9776AF13}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D2604F74-2586-6ABC-6FF9-CBEF9EA70B74}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D2604F74-2586-6ABC-6FF9-CBEF9EA70B74}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D2604F74-2586-6ABC-6FF9-CBEF9EA70B74}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D2604F74-2586-6ABC-6FF9-CBEF9EA70B74}.Release|Any CPU.Build.0 = Release|Any CPU
+		{317383BB-61A3-559D-C219-2379304BA266}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{317383BB-61A3-559D-C219-2379304BA266}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{317383BB-61A3-559D-C219-2379304BA266}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{317383BB-61A3-559D-C219-2379304BA266}.Release|Any CPU.Build.0 = Release|Any CPU
+		{95F5FA66-A82F-7969-B763-81DC57760F5F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{95F5FA66-A82F-7969-B763-81DC57760F5F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{95F5FA66-A82F-7969-B763-81DC57760F5F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{95F5FA66-A82F-7969-B763-81DC57760F5F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{15B318F4-9EA3-8DB3-7E8F-9FC7C77A289D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{15B318F4-9EA3-8DB3-7E8F-9FC7C77A289D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{15B318F4-9EA3-8DB3-7E8F-9FC7C77A289D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{15B318F4-9EA3-8DB3-7E8F-9FC7C77A289D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3C323604-229A-80B7-654D-F7B36B6A85B7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C323604-229A-80B7-654D-F7B36B6A85B7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C323604-229A-80B7-654D-F7B36B6A85B7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C323604-229A-80B7-654D-F7B36B6A85B7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D2126283-D8CB-7396-9334-93486BE0A474}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D2126283-D8CB-7396-9334-93486BE0A474}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D2126283-D8CB-7396-9334-93486BE0A474}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D2126283-D8CB-7396-9334-93486BE0A474}.Release|Any CPU.Build.0 = Release|Any CPU
+		{00C903B2-1B8E-3340-0FB0-AE146C05201E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{00C903B2-1B8E-3340-0FB0-AE146C05201E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{00C903B2-1B8E-3340-0FB0-AE146C05201E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{00C903B2-1B8E-3340-0FB0-AE146C05201E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2C8E25A2-F157-DCB1-BA42-B50FB52DED3E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2C8E25A2-F157-DCB1-BA42-B50FB52DED3E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2C8E25A2-F157-DCB1-BA42-B50FB52DED3E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2C8E25A2-F157-DCB1-BA42-B50FB52DED3E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C3157B1-7993-CFAF-6270-3E370C4DBF88}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C3157B1-7993-CFAF-6270-3E370C4DBF88}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C3157B1-7993-CFAF-6270-3E370C4DBF88}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C3157B1-7993-CFAF-6270-3E370C4DBF88}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{013CBDF6-1362-BD2B-CE49-8711A8617C59} = {B918B3E3-5DC4-8CA5-41CF-2D28E6F790E2}
+		{564A45B0-7B9D-74A4-3EFE-68825E621FF8} = {013CBDF6-1362-BD2B-CE49-8711A8617C59}
+		{E396A1C2-6090-17DB-D1DC-41E96BF3E15E} = {564A45B0-7B9D-74A4-3EFE-68825E621FF8}
+		{2546E30A-0EB5-65B5-3E57-E237C614F56B} = {E396A1C2-6090-17DB-D1DC-41E96BF3E15E}
+		{20C1402D-52B6-FE38-4108-B0A762137F27} = {2546E30A-0EB5-65B5-3E57-E237C614F56B}
+		{973A2D2B-228E-A470-1153-6F30BD966B10} = {20C1402D-52B6-FE38-4108-B0A762137F27}
+		{302F8B70-424F-ED9E-E24D-B298F36F55BA} = {2546E30A-0EB5-65B5-3E57-E237C614F56B}
+		{591D81AD-A558-C249-425B-0C56E804E040} = {302F8B70-424F-ED9E-E24D-B298F36F55BA}
+		{D588EA18-CAA6-9F65-BE5A-A83E1592362B} = {E396A1C2-6090-17DB-D1DC-41E96BF3E15E}
+		{440205CE-55BD-ECA6-5242-3824EE5EFF94} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{6784C9D8-D601-BFE2-26A8-E05EC11DC93F} = {440205CE-55BD-ECA6-5242-3824EE5EFF94}
+		{87D38C23-6071-5535-C868-CD36F33DD526} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{F58BA2F3-906D-FC66-28D2-70012F01059A} = {87D38C23-6071-5535-C868-CD36F33DD526}
+		{D0391EA8-83C3-8909-FA8F-18F07F72377F} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{65BA10B3-17B6-A2B9-CBEC-0F5905DADDF9} = {D0391EA8-83C3-8909-FA8F-18F07F72377F}
+		{8F2A38F5-3CA8-5BED-9865-0AC1199F9F94} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{DE12802C-312B-5870-D36E-B66C956262CD} = {8F2A38F5-3CA8-5BED-9865-0AC1199F9F94}
+		{45A97277-E76E-104B-8719-6A3B1963F47B} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{87DDE150-3476-667E-1CF7-E9401EE78E97} = {45A97277-E76E-104B-8719-6A3B1963F47B}
+		{3F3B2313-7A16-3BD7-F410-34A23A5A2ACD} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{B7AC2A44-D3B0-B169-D969-0FFB4AE2652A} = {3F3B2313-7A16-3BD7-F410-34A23A5A2ACD}
+		{0771286D-7A63-FAEC-2963-770A221297E5} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{CC8CD398-7ADD-4850-5A8A-B1CE7DCF785F} = {0771286D-7A63-FAEC-2963-770A221297E5}
+		{B7A0848B-79A9-12BE-EB42-CAB3AD3F6605} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{45E9A8E1-DED5-4D38-57BD-EE856FE1C7BB} = {B7A0848B-79A9-12BE-EB42-CAB3AD3F6605}
+		{EBBB07DD-FFBE-E7CA-C807-B79DC7186F9A} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{430483D6-0BA5-5D6C-2993-C8677C4E08DE} = {EBBB07DD-FFBE-E7CA-C807-B79DC7186F9A}
+		{AB50F6D6-B0F9-CE10-9CC9-EA59409E881F} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{B6EE247A-7899-6936-E50A-E79EE9A24F12} = {AB50F6D6-B0F9-CE10-9CC9-EA59409E881F}
+		{07FC2AB7-4C65-3FE4-2DD5-904EBA7CD837} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{0522073E-9454-E95A-566D-4BD969677D00} = {07FC2AB7-4C65-3FE4-2DD5-904EBA7CD837}
+		{7F7CFCB1-AA3D-9344-6319-1633BBFD601F} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{A88C1EAF-E592-A6A1-E89B-D3ED9776AF13} = {7F7CFCB1-AA3D-9344-6319-1633BBFD601F}
+		{EAB4D10D-35F9-A7BA-0971-A981A2DACE1E} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{D2604F74-2586-6ABC-6FF9-CBEF9EA70B74} = {EAB4D10D-35F9-A7BA-0971-A981A2DACE1E}
+		{96055A72-33B9-583D-4888-3198B66FC9C1} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{317383BB-61A3-559D-C219-2379304BA266} = {96055A72-33B9-583D-4888-3198B66FC9C1}
+		{7E280A6A-AB95-2069-2568-34DF595038DA} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{95F5FA66-A82F-7969-B763-81DC57760F5F} = {7E280A6A-AB95-2069-2568-34DF595038DA}
+		{17732C52-C352-0412-DE38-B60CCE36D0F9} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{15B318F4-9EA3-8DB3-7E8F-9FC7C77A289D} = {17732C52-C352-0412-DE38-B60CCE36D0F9}
+		{5806CBB2-B1D8-A6D7-C7E6-74807EBF7A69} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{3C323604-229A-80B7-654D-F7B36B6A85B7} = {5806CBB2-B1D8-A6D7-C7E6-74807EBF7A69}
+		{89AFFC4D-DD6C-AB18-7FF0-EA42B62E06BB} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{D2126283-D8CB-7396-9334-93486BE0A474} = {89AFFC4D-DD6C-AB18-7FF0-EA42B62E06BB}
+		{064D662A-C690-18DC-6FFE-4E9C207873F3} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{00C903B2-1B8E-3340-0FB0-AE146C05201E} = {064D662A-C690-18DC-6FFE-4E9C207873F3}
+		{244273EE-1F99-D229-AD26-F4BCEF85F642} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{2C8E25A2-F157-DCB1-BA42-B50FB52DED3E} = {244273EE-1F99-D229-AD26-F4BCEF85F642}
+		{038DAC60-9455-FD02-129D-933CF5E1D1A8} = {D588EA18-CAA6-9F65-BE5A-A83E1592362B}
+		{6C3157B1-7993-CFAF-6270-3E370C4DBF88} = {038DAC60-9455-FD02-129D-933CF5E1D1A8}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {12696890-52A2-406A-9CF4-E54420828B3C}
+	EndGlobalSection
+EndGlobal

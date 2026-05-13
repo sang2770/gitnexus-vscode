@@ -221,6 +221,7 @@ export async function repoMenuCommand(
 
   const picked = await vscode.window.showQuickPick(
     [
+      { label: '$(graph-line) Analyze', description: repoName, action: 'analyze' },
       { label: '$(check) Activate', description: repoName, action: 'activate' },
       { label: '$(add) Add to Group', description: repoName, action: 'addToGroup' },
     ],
@@ -231,7 +232,9 @@ export async function repoMenuCommand(
     return;
   }
 
-  if (picked.action === 'activate') {
+  if (picked.action === 'analyze') {
+    await vscode.commands.executeCommand('codebrain.analyzeTreeItem', { meta: { name: repoName } });
+  } else if (picked.action === 'activate') {
     await setActiveContext(context.globalState, 'repo', repoName);
     vscode.window.showInformationMessage(`Activated repository: ${repoName}`);
     await vscode.commands.executeCommand('codebrain.refreshTreeView');

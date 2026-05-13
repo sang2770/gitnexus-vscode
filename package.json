@@ -31,7 +31,13 @@
       },
       {
         "command": "codebrain.analyze",
-        "title": "Analyze Repo",
+        "title": "Analyze Active Context",
+        "category": "CodeBrain",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "codebrain.analyzeTreeItem",
+        "title": "Analyze This Item",
         "category": "CodeBrain",
         "icon": "$(graph-line)"
       },
@@ -230,24 +236,39 @@
       ],
       "view/item/context": [
         {
-          "command": "codebrain.selectRepo",
+          "command": "codebrain.analyzeTreeItem",
           "when": "view == codebrain.groupsRepos && viewItem == repo",
           "group": "1_repo@1"
         },
         {
-          "command": "codebrain.addRepoToGroup",
+          "command": "codebrain.selectRepo",
           "when": "view == codebrain.groupsRepos && viewItem == repo",
           "group": "1_repo@2"
         },
         {
-          "command": "codebrain.selectGroup",
+          "command": "codebrain.addRepoToGroup",
+          "when": "view == codebrain.groupsRepos && viewItem == repo",
+          "group": "1_repo@3"
+        },
+        {
+          "command": "codebrain.analyzeTreeItem",
           "when": "view == codebrain.groupsRepos && viewItem == group",
           "group": "1_group@1"
         },
         {
-          "command": "codebrain.removeRepoFromGroup",
+          "command": "codebrain.selectGroup",
+          "when": "view == codebrain.groupsRepos && viewItem == group",
+          "group": "1_group@2"
+        },
+        {
+          "command": "codebrain.analyzeTreeItem",
           "when": "view == codebrain.groupsRepos && viewItem == repoInGroup",
           "group": "1_repoInGroup@1"
+        },
+        {
+          "command": "codebrain.removeRepoFromGroup",
+          "when": "view == codebrain.groupsRepos && viewItem == repoInGroup",
+          "group": "1_repoInGroup@2"
         }
       ],
       "commandPalette": [
@@ -257,14 +278,6 @@
         }
       ]
     },
-    "chatSkills": [
-      {
-        "path": "./skills/gitnexus-query/SKILL.md"
-      },
-      {
-        "path": "./skills/gitnexus-pr-review/SKILL.md"
-      }
-    ],
     "chatParticipants": [
       {
         "id": "codebrain.gitnexus",
@@ -304,9 +317,10 @@
     "build:web": "cd GitNexus/gitnexus-web && npm run build",
     "build:ext": "npm run build-icon && npm run compile",
     "bundle:cli": "node scripts/copy-cli.mjs",
-    "package": "vsce package --allow-missing-repository --skip-license --out codebrain-vscode.vsix"
+    "package": "vsce package --allow-missing-repository --out codebrain-vscode.vsix"
   },
   "devDependencies": {
+    "@vscode/chat-extension-utils": "*",
     "@types/node": "^20.19.39",
     "@types/vscode": "^1.99.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
@@ -314,6 +328,6 @@
     "eslint": "^9.0.0",
     "sharp": "^0.33.5",
     "typescript": "^5.4.0",
-    "vsce": "^3.0.0"
+    "vsce": "*"
   }
 }

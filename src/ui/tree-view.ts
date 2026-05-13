@@ -59,7 +59,7 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
 
     const actions: Array<{ label: string; description: string; command: string }> = [
       { label: 'Setup CodeBrain (MCP + Agents)', description: 'Install/check CLI + configure MCP and agents', command: 'codebrain.setup' },
-      { label: 'Analyze Repo', description: 'Index repository with default options', command: 'codebrain.analyze' },
+      { label: 'Analyze Active Context', description: 'Index active repo/group (or workspace default)', command: 'codebrain.analyze' },
       { label: 'Force Re-index', description: 'Full rebuild of index', command: 'codebrain.analyzeForce' },
       { label: 'Show Index Status', description: 'Check index freshness', command: 'codebrain.status' },
       { label: 'List Indexed Repos', description: 'Show registered repos', command: 'codebrain.listRepos' },

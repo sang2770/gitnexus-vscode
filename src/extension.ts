@@ -1,8 +1,10 @@
 ﻿import * as vscode from "vscode";
 import { setupCommand, installCliCommand } from "./commands/setup.js";
 import {
+  type AnalyzeOptions,
   analyzeCommand,
   analyzeForceCommand,
+  analyzeTreeItemCommand,
   analyzeWithEmbeddingsCommand,
 } from "./commands/analyze.js";
 import {
@@ -87,9 +89,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const gitNexusParticipant = createGitNexusParticipant(context);
   context.subscriptions.push(gitNexusParticipant);
 
-  const runAnalyzeWithStatus = async (
-    opts: { force?: boolean } = {},
-  ): Promise<boolean> => {
+  const runAnalyzeWithStatus = async (opts: AnalyzeOptions = {}): Promise<boolean> => {
     statusBar.setState("indexing");
     try {
       const ok = await analyzeCommand(opts, context);
@@ -110,6 +110,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
     ["codebrain.analyze", () => runAnalyzeWithStatus()],
     ["codebrain.analyzeForce", () => runAnalyzeWithStatus({ force: true })],
+    [
+      "codebrain.analyzeTreeItem",
+      async (...args) => {
+        statusBar.setState("indexing");
+        try {
+          return await analyzeTreeItemCommand(args[0], context);
+        } finally {
+          if (staleness) {
+            await staleness.forceCheck();
+          }
+        }
+      },
+    ],
     // ['codebrain.analyzeEmbeddings', analyzeWithEmbeddingsCommand],
 
     ["codebrain.status", () => statusCommand(context)],
