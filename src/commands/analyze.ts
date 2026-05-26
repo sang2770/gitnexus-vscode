@@ -26,6 +26,39 @@ interface AnalyzeTarget {
   label: string;
 }
 
+function normalizeName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function normalizePathLike(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+function findRepoByRegistryOrGroupPath(
+  repos: Array<{ name: string; path: string }>,
+  registryName: string,
+  groupPath?: string,
+): { name: string; path: string } | undefined {
+  const normalizedRegistryName = normalizeName(registryName);
+  const byName = repos.find((repo) => normalizeName(repo.name) === normalizedRegistryName);
+  if (byName) {
+    return byName;
+  }
+
+  if (!groupPath) {
+    return undefined;
+  }
+
+  const normalizedGroupPath = normalizePathLike(groupPath);
+  return repos.find((repo) => {
+    const normalizedRepoPath = normalizePathLike(repo.path);
+    return (
+      normalizedRepoPath === normalizedGroupPath ||
+      normalizedRepoPath.endsWith(`/${normalizedGroupPath}`)
+    );
+  });
+}
+
 function buildAnalyzeArgs(
   targetPath: string,
   opts: AnalyzeOptions,
@@ -63,17 +96,22 @@ async function resolveAnalyzeTargets(
       return [];
     }
 
-    const repos = await listIndexedRepos();
-    const targets = Object.values(group.repos)
-      .map((registryName) => {
-        const repo = repos.find((r) => r.name === registryName);
-        return repo ? { path: repo.path, label: repo.name } : undefined;
+    const repos = await listIndexedRepos({ includeOutsideWorkspace: true });
+    const seenPaths = new Set<string>();
+    const targets = Object.entries(group.repos)
+      .map(([groupPath, registryName]) => {
+        const repo = findRepoByRegistryOrGroupPath(repos, registryName, groupPath);
+        if (!repo || seenPaths.has(repo.path)) {
+          return undefined;
+        }
+        seenPaths.add(repo.path);
+        return { path: repo.path, label: repo.name };
       })
-      .filter((target): target is AnalyzeTarget => !!target);
+      .filter((target): target is NonNullable<typeof target> => !!target);
 
     if (targets.length === 0) {
       vscode.window.showWarningMessage(
-        `GitNexus: Group "${opts.groupName}" has no indexed repositories in this workspace.`,
+        `GitNexus: Group "${opts.groupName}" has no indexed repositories in the registry.`,
       );
     }
 
@@ -183,12 +221,14 @@ export async function analyzeTreeItemCommand(
   }
 
   const meta = node.meta ?? {};
+
+  // repo-in-group: has groupName + registryName
   if (meta.groupName && meta.registryName) {
-    const repos = await listIndexedRepos();
-    const repo = repos.find((r) => r.name === meta.registryName);
+    const repos = await listIndexedRepos({ includeOutsideWorkspace: true });
+    const repo = findRepoByRegistryOrGroupPath(repos, meta.registryName, meta.groupPath);
     if (!repo) {
       vscode.window.showWarningMessage(
-        `GitNexus: Repository "${meta.registryName}" is not indexed in this workspace.`,
+        `GitNexus: Repository "${meta.registryName}" is not indexed.`,
       );
       return false;
     }
@@ -196,15 +236,35 @@ export async function analyzeTreeItemCommand(
   }
 
   if (meta.name) {
+    // Use nodeType to avoid group/repo name collision
+    if (meta.nodeType === 'group') {
+      const group = await getGroupDetails(meta.name);
+      if (group) {
+        return analyzeCommand({ groupName: group.name }, context);
+      }
+      vscode.window.showWarningMessage(`GitNexus: Group "${meta.name}" not found.`);
+      return false;
+    }
+
+    if (meta.nodeType === 'repo') {
+      const repos = await listIndexedRepos();
+      const repo = repos.find((r) => r.name === meta.name);
+      if (repo) {
+        return analyzeCommand({ path: repo.path }, context);
+      }
+      vscode.window.showWarningMessage(`GitNexus: Repository "${meta.name}" not found in workspace.`);
+      return false;
+    }
+
+    // Legacy fallback (no nodeType): try group first, then repo
+    const group = await getGroupDetails(meta.name);
+    if (group) {
+      return analyzeCommand({ groupName: group.name }, context);
+    }
     const repos = await listIndexedRepos();
     const repo = repos.find((r) => r.name === meta.name);
     if (repo) {
       return analyzeCommand({ path: repo.path }, context);
-    }
-
-    const group = await getGroupDetails(meta.name);
-    if (group) {
-      return analyzeCommand({ groupName: group.name }, context);
     }
   }
 

@@ -2,6 +2,8 @@
 
 CodeBrain is a powerful VS Code extension that brings AI-powered code intelligence to your development workflow. It integrates with GitHub Copilot and the GitNexus knowledge graph to provide advanced code analysis, impact assessment, debugging guidance, and refactoring assistance.
 
+Hướng dẫn sử dụng tiếng Việt: [docs/HDSD.md](./docs/HDSD.md)
+
 ## Features
 
 ### 🔍 Code Intelligence
@@ -24,6 +26,7 @@ CodeBrain is a powerful VS Code extension that brings AI-powered code intelligen
 - Interact with the `@CodeBrain` chat participant in GitHub Copilot Chat
 - Get code explanations, impact analysis, debugging help, and refactoring guidance
 - Automatic context injection based on your active repository/group
+- Auto-generated `.github/skills/gitnexus-active-scope/SKILL.md` keeps Copilot and GitNexus MCP tools aligned to the active repo/group scope
 
 ## Installation
 

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { runCodeBrain, getWorkspaceRoot } from '../process/cli-runner.js';
-import { CodeBrainStatusBar, IndexState } from '../ui/status-bar.js';
+import { CodeBrainStatusBar, IndexState, type IndexTooltipDetails } from '../ui/status-bar.js';
 import { analyzeCommand } from '../commands/analyze.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -101,8 +101,9 @@ export class StalenessMonitor implements vscode.Disposable {
   }
 
   private async _check(runAutoActions: boolean): Promise<IndexState> {
-    const state = await detectIndexState();
-    this._statusBar.setState(state);
+    const details = await detectIndexStatusDetails();
+    const state = details.state;
+    this._statusBar.setState(state, details.tooltip);
 
     if (!runAutoActions) {
       return state;
@@ -274,7 +275,7 @@ export class StalenessMonitor implements vscode.Disposable {
     this._setupOffered = true;
 
     const choice = await vscode.window.showInformationMessage(
-      'GitNexus: This repository is not indexed yet. Set up GitNexus for code intelligence?',
+      'CodeBrain: This repository is not indexed yet. Set up for code intelligence?',
       'Setup Now',
       'Not Now',
     );
@@ -291,35 +292,80 @@ export class StalenessMonitor implements vscode.Disposable {
 
 /** Parse `gitnexus status` output to derive IndexState */
 export async function detectIndexState(): Promise<IndexState> {
+  const details = await detectIndexStatusDetails();
+  return details.state;
+}
+
+interface DetectResult {
+  state: IndexState;
+  tooltip?: IndexTooltipDetails;
+}
+
+async function detectIndexStatusDetails(): Promise<DetectResult> {
   try {
     const result = await runCodeBrain(['status'], {
       cwd: getWorkspaceRoot(),
       stream: false,
     });
 
+    const parsedTooltip = parseStatusTooltip(result.stdout);
+
     if (result.exitCode !== 0) {
       const combined = result.stdout + result.stderr;
       if (combined.includes('not indexed') || combined.includes('No index')) {
-        return 'not-indexed';
+        return { state: 'not-indexed' };
       }
-      return 'error';
+      return { state: 'error' };
     }
 
     const out = result.stdout.toLowerCase();
 
     if (out.includes('stale') || out.includes('behind')) {
-      return 'stale';
+      return { state: 'stale', tooltip: parsedTooltip };
     }
     if (out.includes('up to date') || out.includes('fresh') || out.includes('current')) {
-      return 'fresh';
+      return { state: 'fresh', tooltip: parsedTooltip };
     }
     if (out.includes('not indexed') || out.includes('no index')) {
-      return 'not-indexed';
+      return { state: 'not-indexed' };
     }
 
     // Default: likely fresh if exit code 0
-    return 'fresh';
+    return { state: 'fresh', tooltip: parsedTooltip };
   } catch {
-    return 'error';
+    return { state: 'error' };
   }
+}
+
+function parseStatusTooltip(stdout: string): IndexTooltipDetails | undefined {
+  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  const read = (prefix: string): string | undefined => {
+    const found = lines.find((line) => line.toLowerCase().startsWith(prefix.toLowerCase()));
+    if (!found) {
+      return undefined;
+    }
+    return found.slice(prefix.length).trim();
+  };
+
+  const repository = read('Repository:');
+  const indexed = read('Indexed:');
+  const indexedCommit = read('Indexed commit:');
+  const currentCommit = read('Current commit:');
+  const status = read('Status:');
+
+  if (!repository && !indexed && !indexedCommit && !currentCommit && !status) {
+    return undefined;
+  }
+
+  return {
+    repository,
+    indexed,
+    indexedCommit,
+    currentCommit,
+    status,
+  };
 }

@@ -11,6 +11,14 @@ interface StatusBarConfig {
   command?: string;
 }
 
+export interface IndexTooltipDetails {
+  repository?: string;
+  indexed?: string;
+  indexedCommit?: string;
+  currentCommit?: string;
+  status?: string;
+}
+
 const STATE_CONFIG: Record<IndexState, StatusBarConfig> = {
   unknown: {
     text: '$(graph-line) CodeBrain',
@@ -35,9 +43,9 @@ const STATE_CONFIG: Record<IndexState, StatusBarConfig> = {
   },
   'not-indexed': {
     text: '$(circle-slash) CodeBrain: Not indexed',
-    tooltip: 'CodeBrain: This repo has not been indexed yet. Click to set up.',
+    tooltip: 'CodeBrain: This repo has not been indexed yet. Click to set up and analyze.',
     backgroundColor: new vscode.ThemeColor('statusBarItem.errorBackground'),
-    command: 'codebrain.setup',
+    command: 'codebrain.setupAndAnalyze',
   },
   error: {
     text: '$(error) CodeBrain: Error',
@@ -92,13 +100,31 @@ export class CodeBrainStatusBar implements vscode.Disposable {
     this._contextItem.show();
   }
 
-  setState(state: IndexState): void {
+  setState(state: IndexState, details?: IndexTooltipDetails): void {
     const cfg = STATE_CONFIG[state];
     this._item.text = cfg.text;
-    this._item.tooltip = cfg.tooltip;
+    this._item.tooltip = this._buildTooltip(state, cfg.tooltip, details);
     this._item.color = cfg.color;
     this._item.backgroundColor = cfg.backgroundColor;
     this._item.command = cfg.command;
+  }
+
+  private _buildTooltip(state: IndexState, fallback: string, details?: IndexTooltipDetails): string {
+    if (!details || (state !== 'fresh' && state !== 'stale')) {
+      return fallback;
+    }
+
+    const lines = [
+      `Repository: ${details.repository ?? '-'}`,
+      `Indexed: ${details.indexed ?? '-'}`,
+      `Indexed commit: ${details.indexedCommit ?? '-'}`,
+      `Current commit: ${details.currentCommit ?? '-'}`,
+      `Status: ${details.status ?? (state === 'fresh' ? 'up-to-date' : 'stale')}`,
+      '',
+      state === 'fresh' ? 'Click to view status.' : 'Click to re-index.',
+    ];
+
+    return lines.join('\n');
   }
 
   refreshContext(): void {

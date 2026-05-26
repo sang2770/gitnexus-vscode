@@ -4,6 +4,8 @@
 .gitmodules
 GitNexus/
 node_modules
+!node_modules/@vscode/chat-extension-utils/**
+!node_modules/@vscode/prompt-tsx/**
 runtime/gitnexus/node_modules
 runtime/gitnexus/.runtime-initialized
 out

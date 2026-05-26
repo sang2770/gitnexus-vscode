@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getWorkspaceRoot } from '../process/cli-runner.js';
-import { listIndexedRepos, listGroups, getActiveContext, type ContextType } from '../process/group-context.js';
+import { listIndexedRepos, listGroups, listGroupsInWorkspace, getActiveContext, type ContextType } from '../process/group-context.js';
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -224,7 +224,7 @@ export class GroupsReposTreeProvider implements vscode.TreeDataProvider<TreeNode
       const node = new TreeNode(repo.name, 'repo');
       node.description = repo.path;
       node.tooltip = `Repository: ${repo.name}\nPath: ${repo.path}`;
-      node.meta = { name: repo.name };
+      node.meta = { name: repo.name, nodeType: 'repo' };
       node.contextValue = 'repo';
       node.command = { command: 'codebrain.selectRepo', title: 'Activate Repository', arguments: [repo.name] };
       nodes.push(node);
@@ -233,13 +233,13 @@ export class GroupsReposTreeProvider implements vscode.TreeDataProvider<TreeNode
     // Separator
     nodes.push(new TreeNode('─ Groups ─', 'message'));
 
-    // Add groups
-    const groups = await listGroups();
+    // Add groups (filtered to those with repos in this workspace)
+    const groups = await listGroupsInWorkspace();
     for (const group of groups) {
       const repoCount = Object.keys(group.repos).length;
-      const node = new TreeNode(`${group.name} (${repoCount})`, 'group', { name: group.name }, vscode.TreeItemCollapsibleState.Collapsed);
+      const node = new TreeNode(`${group.name} (${repoCount})`, 'group', { name: group.name, nodeType: 'group' }, vscode.TreeItemCollapsibleState.Collapsed);
       node.tooltip = `Group: ${group.name}\nRepos: ${repoCount}`;
-      node.meta = { name: group.name };
+      node.meta = { name: group.name, nodeType: 'group' };
       node.contextValue = 'group';
       nodes.push(node);
     }

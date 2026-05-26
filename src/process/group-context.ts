@@ -12,6 +12,10 @@ export interface RepoInfo {
   path: string;
 }
 
+interface ListIndexedReposOptions {
+  includeOutsideWorkspace?: boolean;
+}
+
 export interface GroupInfo {
   name: string;
   repos: Record<string, string>; // groupPath -> registryName
@@ -52,7 +56,7 @@ function belongsToWorkspace(repoPath: string, workspaceRoots: string[]): boolean
 /**
  * Get all indexed repositories from registry
  */
-export async function listIndexedRepos(): Promise<RepoInfo[]> {
+export async function listIndexedRepos(options: ListIndexedReposOptions = {}): Promise<RepoInfo[]> {
   try {
     const registryPath = path.join(GITNEXUS_DIR, 'registry.json');
     if (!fs.existsSync(registryPath)) {
@@ -77,6 +81,10 @@ export async function listIndexedRepos(): Promise<RepoInfo[]> {
           rows.push({ name, path: repoPath });
         }
       }
+      if (options.includeOutsideWorkspace) {
+        return rows;
+      }
+
       const workspaceRoots = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [];
       return rows.filter((repo) => belongsToWorkspace(repo.path, workspaceRoots));
     }
@@ -95,12 +103,34 @@ export async function listIndexedRepos(): Promise<RepoInfo[]> {
       }
     }
 
+    if (options.includeOutsideWorkspace) {
+      return rows;
+    }
+
     const workspaceRoots = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [];
     return rows.filter((repo) => belongsToWorkspace(repo.path, workspaceRoots));
   } catch (error) {
     console.error('Error loading repos:', error);
     return [];
   }
+}
+
+function isGroupInWorkspace(group: GroupInfo, workspaceRepos: RepoInfo[]): boolean {
+  for (const registryName of Object.values(group.repos)) {
+    const normalized = registryName.trim().toLowerCase();
+    if (workspaceRepos.some((r) => r.name.trim().toLowerCase() === normalized)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * List groups that have at least one repo belonging to the current workspace.
+ */
+export async function listGroupsInWorkspace(): Promise<GroupInfo[]> {
+  const [allGroups, workspaceRepos] = await Promise.all([listGroups(), listIndexedRepos()]);
+  return allGroups.filter((g) => isGroupInWorkspace(g, workspaceRepos));
 }
 
 /**

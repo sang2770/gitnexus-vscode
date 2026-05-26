@@ -2,11 +2,15 @@
   "name": "codebrain-vscode",
   "displayName": "CodeBrain",
   "description": "Graph-powered code intelligence for Copilot. Auto-setup, auto-index, MCP config, and PR review.",
-  "version": "0.1.0",
+  "version": "1.1.1",
   "publisher": "codebrain",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sang2770/gitnexus-vscode"
+  },
   "engines": {
-    "vscode": "^1.99.0"
+    "vscode": "^1.100.0"
   },
   "categories": [
     "AI",
@@ -317,10 +321,12 @@
     "build:web": "cd GitNexus/gitnexus-web && npm run build",
     "build:ext": "npm run build-icon && npm run compile",
     "bundle:cli": "node scripts/copy-cli.mjs",
-    "package": "vsce package --allow-missing-repository --out codebrain-vscode.vsix"
+    "package": "npm run build:ext && vsce package --allow-missing-repository --out codebrain-vscode.vsix"
+  },
+  "dependencies": {
+    "@vscode/chat-extension-utils": "^0.0.0-alpha.5"
   },
   "devDependencies": {
-    "@vscode/chat-extension-utils": "*",
     "@types/node": "^20.19.39",
     "@types/vscode": "^1.99.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",

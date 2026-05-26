@@ -11,23 +11,51 @@ import {
 } from '../process/cli-runner.js';
 
 /** Full one-shot setup: install/check CLI + run gitnexus setup */
-export async function setupCommand(): Promise<void> {
+export async function setupCommand(): Promise<boolean> {
   const channel = getOutputChannel();
   channel.show(true);
 
   // Step 1 - ensure extension-local CLI (install first time, update later)
   const cliOk = await ensureCodeBrainCli();
   if (!cliOk) {
-    return;
+    return false;
   }
 
   const workspaceRoot = getWorkspaceRoot();
+
+  const scopePick = await vscode.window.showQuickPick(
+    [
+      {
+        label: 'Global setup',
+        description: 'Configure MCP/skills in your user profile (~)',
+        value: 'global',
+      },
+      {
+        label: 'Current project setup',
+        description: 'Create setup files inside this workspace only',
+        value: 'project',
+      },
+    ],
+    {
+      title: 'CodeBrain Setup Scope',
+      placeHolder: 'Choose where to install setup artifacts',
+      ignoreFocusOut: true,
+    },
+  );
+
+  if (!scopePick) {
+    vscode.window.showInformationMessage('CodeBrain: Setup cancelled.');
+    return false;
+  }
 
   // Step 2 - run gitnexus setup (it configures MCP/agents by itself)
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Running CLI setup', cancellable: false },
     async () => {
-      await runCodeBrain(['setup', '--gitnexus-bin', getInstalledCliPath() ?? ''], { cwd: workspaceRoot });
+      await runCodeBrain(
+        ['setup', '--scope', scopePick.value, '--gitnexus-bin', getInstalledCliPath() ?? ''],
+        { cwd: workspaceRoot },
+      );
     },
   );
 
@@ -36,6 +64,7 @@ export async function setupCommand(): Promise<void> {
   fs.writeFileSync(markerPath, Date.now().toString(), 'utf-8');
 
   vscode.window.showInformationMessage('CodeBrain: Setup complete.');
+  return true;
 }
 
 /** Just install / verify CLI, no other side effects */

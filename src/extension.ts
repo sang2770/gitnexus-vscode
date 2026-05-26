@@ -41,12 +41,16 @@ import {
 } from "./ui/tree-view.js";
 import { createGitNexusParticipant } from "./ui/chat-participant.js";
 import {
+  getOutputChannel,
   getWorkspaceRoot,
   initializeCodeBrainRuntime,
 } from "./process/cli-runner.js";
+import { syncActiveContextSkill } from "./process/active-context-skill.js";
 
 export function activate(context: vscode.ExtensionContext): void {
+  const outputChannel = getOutputChannel();
   initializeCodeBrainRuntime(context.globalStorageUri.fsPath);
+  void syncActiveContextSkill(context.globalState);
 
   // ----------------------------------------------------------------
   // Status bar
@@ -83,13 +87,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  // ----------------------------------------------------------------
-  // Chat Participant
-  // ----------------------------------------------------------------
-  const gitNexusParticipant = createGitNexusParticipant(context);
-  context.subscriptions.push(gitNexusParticipant);
-
-  const runAnalyzeWithStatus = async (opts: AnalyzeOptions = {}): Promise<boolean> => {
+  const runAnalyzeWithStatus = async (
+    opts: AnalyzeOptions = {},
+  ): Promise<boolean> => {
     statusBar.setState("indexing");
     try {
       const ok = await analyzeCommand(opts, context);
@@ -106,6 +106,16 @@ export function activate(context: vscode.ExtensionContext): void {
   // ----------------------------------------------------------------
   const cmds: Array<[string, (...args: any[]) => unknown]> = [
     ["codebrain.setup", setupCommand],
+    [
+      "codebrain.setupAndAnalyze",
+      async () => {
+        const setupCompleted = await setupCommand();
+        if (!setupCompleted) {
+          return false;
+        }
+        return runAnalyzeWithStatus();
+      },
+    ],
     ["codebrain.installCli", installCliCommand],
 
     ["codebrain.analyze", () => runAnalyzeWithStatus()],
@@ -185,6 +195,19 @@ export function activate(context: vscode.ExtensionContext): void {
   for (const [id, handler] of cmds) {
     context.subscriptions.push(
       vscode.commands.registerCommand(id, (...args: any[]) => handler(...args)),
+    );
+  }
+
+  // ----------------------------------------------------------------
+  // Chat Participant
+  // ----------------------------------------------------------------
+  outputChannel.appendLine("Initializing Git Nexus participant...");
+  try {
+    const gitNexusParticipant = createGitNexusParticipant(context);
+    context.subscriptions.push(gitNexusParticipant);
+  } catch (err) {
+    outputChannel.appendLine(
+      `Failed to initialize Git Nexus participant: ${err}`,
     );
   }
 

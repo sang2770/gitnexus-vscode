@@ -287,6 +287,7 @@ export async function runCodeBrain(
  */
 export async function installCodeBrainCli(
   token?: vscode.CancellationToken,
+  options: { uninstallFirst?: boolean } = {},
 ): Promise<boolean> {
   const channel = getOutputChannel();
   channel.show(true);
@@ -322,6 +323,10 @@ export async function installCodeBrainCli(
           "--no-fund",
           `${CLI_PACKAGE_NAME}@latest`,
         ];
+  const npmUninstallArgs =
+    process.platform === "win32"
+      ? ["/c", npm, "uninstall", CLI_PACKAGE_NAME]
+      : ["uninstall", CLI_PACKAGE_NAME];
   if (!fs.existsSync(packageJsonPath)) {
     // Step 1: Always run 'npm init -y'
     try {
@@ -329,6 +334,18 @@ export async function installCodeBrainCli(
     } catch (err) {
       channel.appendLine(
         `[ERROR] npm init -y failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
+  }
+
+  if (options.uninstallFirst) {
+    // Force a clean update path: remove old package before installing latest.
+    try {
+      await runCommand(npmCmd, npmUninstallArgs, installRoot, channel, token);
+    } catch (err) {
+      channel.appendLine(
+        `[ERROR] npm uninstall failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       return false;
     }
@@ -449,7 +466,7 @@ export async function ensureCodeBrainCliInstalled(
         title: `CodeBrain: Updating CLI ${current} → ${latest}...`,
         cancellable: false,
       },
-      () => installCodeBrainCli(token),
+      () => installCodeBrainCli(token, { uninstallFirst: true }),
     );
     _cliInstallPromise = updatePromise;
 

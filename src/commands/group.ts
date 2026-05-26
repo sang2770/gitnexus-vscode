@@ -9,6 +9,7 @@ import {
   clearActiveContext,
   getGroupDetails,
 } from '../process/group-context.js';
+import { syncActiveContextSkill } from '../process/active-context-skill.js';
 
 interface TreeCommandNode {
   meta?: Record<string, string>;
@@ -38,6 +39,7 @@ export async function selectRepoCommand(
   const directRepoName = resolveNameFromArg(arg);
   if (directRepoName) {
     await setActiveContext(context.globalState, 'repo', directRepoName);
+    await syncActiveContextSkill(context.globalState);
     vscode.window.showInformationMessage(`Activated repository: ${directRepoName}`);
     await vscode.commands.executeCommand('codebrain.refreshTreeView');
     return;
@@ -62,6 +64,7 @@ export async function selectRepoCommand(
 
   if (selected) {
     await setActiveContext(context.globalState, 'repo', selected.repo.name);
+    await syncActiveContextSkill(context.globalState);
     vscode.window.showInformationMessage(`Activated repository: ${selected.repo.name}`);
     await vscode.commands.executeCommand('codebrain.refreshTreeView');
   }
@@ -79,6 +82,7 @@ export async function selectGroupCommand(
   const directGroupName = resolveNameFromArg(arg);
   if (directGroupName) {
     await setActiveContext(context.globalState, 'group', directGroupName);
+    await syncActiveContextSkill(context.globalState);
     vscode.window.showInformationMessage(`Activated group: ${directGroupName}`);
     await vscode.commands.executeCommand('codebrain.refreshTreeView');
     return;
@@ -103,6 +107,7 @@ export async function selectGroupCommand(
 
   if (selected) {
     await setActiveContext(context.globalState, 'group', selected.group.name);
+    await syncActiveContextSkill(context.globalState);
     vscode.window.showInformationMessage(`Activated group: ${selected.group.name}`);
     await vscode.commands.executeCommand('codebrain.refreshTreeView');
   }
@@ -110,6 +115,7 @@ export async function selectGroupCommand(
 
 export async function clearActivationCommand(context: vscode.ExtensionContext): Promise<void> {
   await clearActiveContext(context.globalState);
+  await syncActiveContextSkill(context.globalState);
   vscode.window.showInformationMessage('Cleared active context. Will use workspace default.');
   await vscode.commands.executeCommand('codebrain.refreshTreeView');
 }
@@ -236,6 +242,7 @@ export async function repoMenuCommand(
     await vscode.commands.executeCommand('codebrain.analyzeTreeItem', { meta: { name: repoName } });
   } else if (picked.action === 'activate') {
     await setActiveContext(context.globalState, 'repo', repoName);
+    await syncActiveContextSkill(context.globalState);
     vscode.window.showInformationMessage(`Activated repository: ${repoName}`);
     await vscode.commands.executeCommand('codebrain.refreshTreeView');
   } else {
