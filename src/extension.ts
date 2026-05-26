@@ -63,7 +63,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // ----------------------------------------------------------------
   let staleness: StalenessMonitor | undefined;
   setTimeout(() => {
-    staleness = new StalenessMonitor(statusBar);
+    staleness = new StalenessMonitor(statusBar, context.globalState);
     staleness.start();
     context.subscriptions.push(staleness);
   }, 1000);

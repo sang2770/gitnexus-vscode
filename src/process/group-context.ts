@@ -177,6 +177,14 @@ export function getActiveContext(storage: vscode.Memento): ActiveContext | undef
   return undefined;
 }
 
+function hasMatchingName(
+  activeName: string,
+  items: Array<{ name: string }>,
+): boolean {
+  const normalizedActive = activeName.trim().toLowerCase();
+  return items.some((item) => item.name.trim().toLowerCase() === normalizedActive);
+}
+
 /**
  * Set active context in extension storage
  */
@@ -198,6 +206,36 @@ export async function setActiveContext(
  */
 export async function clearActiveContext(storage: vscode.Memento): Promise<void> {
   await storage.update(STORAGE_KEY, undefined);
+}
+
+/**
+ * Return active context only when it still belongs to current workspace.
+ * If active context is stale (repo/group missing from workspace), clear it.
+ */
+export async function ensureWorkspaceActiveContext(
+  storage: vscode.Memento,
+): Promise<ActiveContext | undefined> {
+  const active = getActiveContext(storage);
+  if (!active) {
+    return undefined;
+  }
+
+  if (active.type === 'repo') {
+    const repos = await listIndexedRepos();
+    if (hasMatchingName(active.name, repos)) {
+      return active;
+    }
+    await clearActiveContext(storage);
+    return undefined;
+  }
+
+  const groups = await listGroupsInWorkspace();
+  if (hasMatchingName(active.name, groups)) {
+    return active;
+  }
+
+  await clearActiveContext(storage);
+  return undefined;
 }
 
 /**

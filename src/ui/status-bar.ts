@@ -17,6 +17,16 @@ export interface IndexTooltipDetails {
   indexedCommit?: string;
   currentCommit?: string;
   status?: string;
+  groupName?: string;
+  lastSync?: string;
+  groupRepos?: GroupRepoStatus[];
+}
+
+export interface GroupRepoStatus {
+  path: string;
+  indexStatus: 'ok' | 'stale' | 'missing';
+  commitsBehind?: number;
+  contractsStale?: boolean;
 }
 
 const STATE_CONFIG: Record<IndexState, StatusBarConfig> = {
@@ -110,7 +120,15 @@ export class CodeBrainStatusBar implements vscode.Disposable {
   }
 
   private _buildTooltip(state: IndexState, fallback: string, details?: IndexTooltipDetails): string {
-    if (!details || (state !== 'fresh' && state !== 'stale')) {
+    if (!details) {
+      return fallback;
+    }
+
+    if (details.groupRepos && details.groupRepos.length > 0) {
+      return this._buildGroupTooltip(state, fallback, details);
+    }
+
+    if (state !== 'fresh' && state !== 'stale') {
       return fallback;
     }
 
@@ -124,6 +142,41 @@ export class CodeBrainStatusBar implements vscode.Disposable {
       state === 'fresh' ? 'Click to view status.' : 'Click to re-index.',
     ];
 
+    return lines.join('\n');
+  }
+
+  private _buildGroupTooltip(state: IndexState, fallback: string, details: IndexTooltipDetails): string {
+    const repos = details.groupRepos ?? [];
+    if (repos.length === 0) {
+      return fallback;
+    }
+
+    const lines = [
+      `Group: ${details.groupName ?? '-'}`,
+      `Last sync: ${details.lastSync ?? 'never synced'}`,
+      '',
+      'Repo index / contracts status:',
+    ];
+
+    let anyContractsStale = false;
+    for (const repo of repos) {
+      let statusText = repo.indexStatus.toUpperCase();
+      if (repo.indexStatus === 'stale' && typeof repo.commitsBehind === 'number') {
+        statusText += ` (${repo.commitsBehind} behind)`;
+      }
+      const contractsFlag = repo.contractsStale ? ' (contracts stale)' : '';
+      if (repo.contractsStale) anyContractsStale = true;
+      lines.push(`- ${repo.path}: ${statusText}${contractsFlag}`);
+    }
+
+    if (anyContractsStale) {
+      lines.push('');
+      lines.push('Note: "contracts stale" means the group Contract Registry snapshot is out-of-date for that repo.');
+      lines.push('Fix: re-run `gitnexus analyze` in the affected repo(s), then `gitnexus group sync <group>` to update contracts.json.');
+    }
+
+    lines.push('');
+    lines.push(state === 'stale' || state === 'not-indexed' ? 'Click to re-index.' : 'Click to view status.');
     return lines.join('\n');
   }
 

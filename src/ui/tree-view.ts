@@ -2,7 +2,13 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getWorkspaceRoot } from '../process/cli-runner.js';
-import { listIndexedRepos, listGroups, listGroupsInWorkspace, getActiveContext, type ContextType } from '../process/group-context.js';
+import {
+  listIndexedRepos,
+  listGroups,
+  listGroupsInWorkspace,
+  ensureWorkspaceActiveContext,
+  type ContextType,
+} from '../process/group-context.js';
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -189,9 +195,11 @@ export class GroupsReposTreeProvider implements vscode.TreeDataProvider<TreeNode
 
   private async _getRootNodes(): Promise<TreeNode[]> {
     const nodes: TreeNode[] = [];
+    const repos = await listIndexedRepos();
+    const groups = await listGroupsInWorkspace();
 
-    // Show active context
-    const activeContext = getActiveContext(this.storage);
+    // Keep active context aligned with current workspace visibility.
+    const activeContext = await ensureWorkspaceActiveContext(this.storage);
     if (activeContext) {
       const contextNode = new TreeNode(
         `Active: ${activeContext.name} (${activeContext.type})`,
@@ -219,7 +227,6 @@ export class GroupsReposTreeProvider implements vscode.TreeDataProvider<TreeNode
     nodes.push(new TreeNode('─ Repositories ─', 'message'));
 
     // Add repos
-    const repos = await listIndexedRepos();
     for (const repo of repos) {
       const node = new TreeNode(repo.name, 'repo');
       node.description = repo.path;
@@ -234,7 +241,6 @@ export class GroupsReposTreeProvider implements vscode.TreeDataProvider<TreeNode
     nodes.push(new TreeNode('─ Groups ─', 'message'));
 
     // Add groups (filtered to those with repos in this workspace)
-    const groups = await listGroupsInWorkspace();
     for (const group of groups) {
       const repoCount = Object.keys(group.repos).length;
       const node = new TreeNode(`${group.name} (${repoCount})`, 'group', { name: group.name, nodeType: 'group' }, vscode.TreeItemCollapsibleState.Collapsed);
