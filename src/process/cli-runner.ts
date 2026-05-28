@@ -13,10 +13,18 @@ export interface CliRunResult {
 let _outputChannel: vscode.OutputChannel | undefined;
 let _extensionStorageRoot: string | undefined;
 let _cliInstallPromise: Thenable<boolean> | undefined;
+let _latestVersionCache:
+  | {
+      value: string | null;
+      checkedAt: number;
+    }
+  | undefined;
 
 const CLI_PACKAGE_NAME = "@xuansang2770/gitnexus";
 const CLI_INSTALL_FOLDER = "gitnexus-cli";
 const CLI_SETUP_STATE_FILE = ".codebrain-cli-setup-done";
+const CLI_VERSION_CHECK_SUCCESS_TTL_MS = 6 * 60 * 60 * 1000;
+const CLI_VERSION_CHECK_FAILURE_TTL_MS = 10 * 60 * 1000;
 
 export function getOutputChannel(): vscode.OutputChannel {
   if (!_outputChannel) {
@@ -120,6 +128,30 @@ async function getLatestCliVersion(npm: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function getCachedLatestCliVersion(): string | null | undefined {
+  if (!_latestVersionCache) {
+    return undefined;
+  }
+
+  const ttl =
+    _latestVersionCache.value === null
+      ? CLI_VERSION_CHECK_FAILURE_TTL_MS
+      : CLI_VERSION_CHECK_SUCCESS_TTL_MS;
+
+  if (Date.now() - _latestVersionCache.checkedAt < ttl) {
+    return _latestVersionCache.value;
+  }
+
+  return undefined;
+}
+
+function setCachedLatestCliVersion(value: string | null): void {
+  _latestVersionCache = {
+    value,
+    checkedAt: Date.now(),
+  };
 }
 
 /** Resolve the codebrain binary path from PATH, returns null if not found.
@@ -444,7 +476,13 @@ export async function ensureCodeBrainCliInstalled(
   }
 
   const current = getInstalledCliVersion();
-  const latest = await getLatestCliVersion(npm);
+  const cachedLatest = getCachedLatestCliVersion();
+  const latest =
+    cachedLatest !== undefined ? cachedLatest : await getLatestCliVersion(npm);
+  if (cachedLatest === undefined) {
+    // Cache both successful and failed lookups to avoid repeated network waits.
+    setCachedLatestCliVersion(latest);
+  }
   if (!current || !latest) {
     return true;
   }

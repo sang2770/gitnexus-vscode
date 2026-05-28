@@ -28,6 +28,12 @@ Hướng dẫn sử dụng tiếng Việt: [docs/HDSD.md](./docs/HDSD.md)
 - Automatic context injection based on your active repository/group
 - Auto-generated `.github/skills/gitnexus-active-scope/SKILL.md` keeps Copilot and GitNexus MCP tools aligned to the active repo/group scope
 
+### 🧭 Jira Plan + GitNexus Query (New)
+- **What:** Build a reproducible implementation plan by combining Jira issue context (Atlassian) with GitNexus code intelligence.
+- **How it works:** The extension fetches the Jira issue details (via Atlassian APIs or MCP), builds an analysis brief (objectives, hypotheses, unknowns), then runs GitNexus MCP tools (`list_repos`, `query`, `context`, `impact`, `detect_changes`) to map the code scope and risk. Finally it returns a structured Execution Plan and a draft Jira comment.
+- **Usage:** Run the command **CodeBrain: Jira Plan + GitNexus Query** from the Command Palette, enter the Jira issue key (e.g. `PROJ-123`), and optionally add collaboration context. The chat participant will open with an evidence-driven plan in sections: Analysis Brief, GitNexus Findings, Execution Plan, Decision, Jira Comment Draft.
+- **Why useful:** Streamlines the incident-to-fix flow by linking issue context directly to the code blast radius and producing an auditable plan for reviewers.
+
 ## Installation
 
 ### Option 1: From VS Code Marketplace
@@ -81,6 +87,7 @@ Available slash commands:
 - `/impact` - Run impact analysis on a symbol
 - `/debug` - Get debugging guidance and root-cause analysis
 - `/refactor` - Implement refactoring changes
+- `/plan` - Build a Jira-to-implementation plan with Atlassian + GitNexus MCP
 
 ## Core Workflows
 
@@ -164,6 +171,7 @@ Available slash commands:
 ### Analysis Commands
 - **CodeBrain: Analyze Workspace** - Analyze active context (repo or group)
 - **CodeBrain: Query Knowledge Graph** - Query code relationships
+- **CodeBrain: Jira Plan + GitNexus Query** - Build plan from Jira context + GitNexus impact/query evidence
 - **CodeBrain: PR Review** - Review pull requests with CodeBrain guidance
 
 ### Repository Management

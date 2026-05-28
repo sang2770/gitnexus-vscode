@@ -39,6 +39,55 @@ export async function queryCommand(context?: vscode.ExtensionContext): Promise<v
   );
 }
 
+export async function jiraPlanAndQueryCommand(context?: vscode.ExtensionContext): Promise<void> {
+  const issueKey = await vscode.window.showInputBox({
+    title: 'CodeBrain Jira Plan',
+    prompt: 'Enter Jira issue key to build a plan from Atlassian MCP + GitNexus MCP',
+    placeHolder: 'PROJ-123',
+    validateInput: (value) => {
+      const normalized = value.trim().toUpperCase();
+      return /^[A-Z][A-Z0-9_]+-\d+$/.test(normalized)
+        ? undefined
+        : 'Issue key must look like PROJ-123.';
+    },
+  });
+  if (!issueKey) {
+    return;
+  }
+
+  const collaborationGoal = await vscode.window.showInputBox({
+    title: 'CodeBrain Jira Plan',
+    prompt: 'Optional: add collaboration context (incident, release scope, squad goal)',
+    placeHolder: 'Checkout timeout spikes during deploy window',
+    value: '',
+  });
+
+  const workspaceRoot = context
+    ? (await getActiveRepoPath(context.globalState)) ?? getWorkspaceRoot()
+    : getWorkspaceRoot();
+
+  const planPrompt = [
+    'Slash command mode: /plan.',
+    `Jira issue key: ${issueKey.trim().toUpperCase()}.`,
+    collaborationGoal?.trim()
+      ? `Collaboration context: ${collaborationGoal.trim()}.`
+      : 'Collaboration context: none provided.',
+    `Workspace scope: ${workspaceRoot}.`,
+    '',
+    'Workflow to execute with MCP tools:',
+    '1) Atlassian MCP: read Jira issue details, comments, links, assignee, priority, sprint context.',
+    '2) Build Analysis Brief: objective, hypotheses, unknowns, and query keywords.',
+    '3) GitNexus MCP: list_repos, query, context, impact, detect_changes (if local changes exist).',
+    '4) Output Execution Plan: scope, tasks, test plan, risk matrix, and Go/No-Go decision.',
+    '',
+    'Respond with sections: Analysis Brief, GitNexus Findings, Execution Plan, Decision, Jira Comment Draft.',
+  ].join('\n');
+
+  const encodedPrompt = encodeURIComponent(planPrompt);
+  const chatUri = vscode.Uri.parse(`vscode://xpl.chat-uri/startChat?agent=codebrain.gitnexus&prompt=${encodedPrompt}`);
+  await vscode.commands.executeCommand('vscode.open', chatUri);
+}
+
 export async function wikiCommand(): Promise<void> {
   const ok = await ensureCodeBrainCli();
   if (!ok) {
@@ -111,7 +160,7 @@ export async function serveCommand(): Promise<void> {
   });
 }
 
-export async function prReviewCommand(): Promise<void> {
+export async function prReviewCommand(context?: vscode.ExtensionContext): Promise<void> {
   const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
@@ -119,7 +168,20 @@ export async function prReviewCommand(): Promise<void> {
 
   const channel = getOutputChannel();
   channel.show(true);
-  const workspaceRoot = getWorkspaceRoot();
+  const workspaceRoot = context
+    ? (await getActiveRepoPath(context.globalState)) ?? getWorkspaceRoot()
+    : getWorkspaceRoot();
+
+  const reviewMode = await pickPrReviewMode(workspaceRoot);
+  if (!reviewMode) {
+    return;
+  }
+
+  const changedFiles = getChangedFilesForReview(workspaceRoot, reviewMode);
+  if (changedFiles.length === 0) {
+    vscode.window.showWarningMessage('CodeBrain: No changed files found for the selected review scope.');
+    return;
+  }
 
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Preparing PR review context...', cancellable: true },
@@ -131,18 +193,32 @@ export async function prReviewCommand(): Promise<void> {
       // Health hint: show current index status in output panel (best-effort only).
       await runCodeBrain(['status'], { cwd: workspaceRoot, stream: true });
 
-      const stagedFiles = getStagedFiles(workspaceRoot);
-      const stagedSection =
-        stagedFiles.length > 0
-          ? stagedFiles.map((f) => `- ${f}`).join('\n')
-          : '- No staged files detected. Ask user whether to review working tree or compare branch.';
+      const detectArgs = ['detect-changes', '--scope', reviewMode.scope, '--repo', workspaceRoot];
+      if (reviewMode.baseRef) {
+        detectArgs.push('--base-ref', reviewMode.baseRef);
+      }
+
+      const detectResult = await runCodeBrain(detectArgs, {
+        cwd: workspaceRoot,
+        stream: true,
+        token,
+      });
+
+      const changedSection = changedFiles.map((f) => `- ${f}`).join('\n');
+      const detectSummary = buildDetectChangesSummary(detectResult.stdout, detectResult.stderr);
+      const scopeSummary =
+        reviewMode.scope === 'compare'
+          ? `compare against ${reviewMode.baseRef ?? 'main'}`
+          : reviewMode.scope;
 
       // Open Copilot chat with the reviewer agent and prefilled context
       const prompt =
         'Run a PR review using CodeBrain MCP tools.\n' +
-        'Workflow: 1) run detect_changes(scope: staged or compare), 2) run impact on modified symbols, 3) report findings by severity, 4) add missing tests.\n\n' +
-        'Staged files:\n' +
-        `${stagedSection}`;
+        'Workflow: 1) inspect changed files, 2) run detect_changes for the selected scope, 3) run impact on modified symbols, 4) run context on key symbols, 5) report findings by severity, 6) add missing tests.\n\n' +
+        `Review scope: ${scopeSummary}\n` +
+        `Changed files (${changedFiles.length}):\n${changedSection}\n\n` +
+        `Detect-changes preflight:\n${detectSummary}\n\n` +
+        'Review focus: highlight callers outside the diff, missing tests, and risky process / route impacts.';
 
       const encodedPrompt = encodeURIComponent(prompt);
       // VS Code Copilot chat URI â€” opens chat with prefilled prompt
@@ -422,4 +498,129 @@ function getStagedFiles(cwd: string): string[] {
   } catch {
     return [];
   }
+}
+
+type PrReviewScope = 'staged' | 'all' | 'compare';
+
+interface PrReviewMode {
+  scope: PrReviewScope;
+  baseRef?: string;
+}
+
+async function pickPrReviewMode(cwd: string): Promise<PrReviewMode | undefined> {
+  const defaultBaseRef = getDefaultBaseRef(cwd);
+  const items: Array<vscode.QuickPickItem & { mode: PrReviewMode }> = [
+    {
+      label: 'Review staged changes',
+      description: 'Use git diff --cached',
+      mode: { scope: 'staged' },
+    },
+    {
+      label: 'Review working tree',
+      description: 'Use staged + unstaged changes',
+      mode: { scope: 'all' },
+    },
+    {
+      label: 'Review against base branch',
+      description: `Compare current branch against ${defaultBaseRef}`,
+      mode: { scope: 'compare', baseRef: defaultBaseRef },
+    },
+  ];
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: 'CodeBrain PR Review',
+    placeHolder: 'Choose which changes to review',
+  });
+  if (!picked) {
+    return undefined;
+  }
+
+  if (picked.mode.scope !== 'compare') {
+    return picked.mode;
+  }
+
+  const baseRef = await vscode.window.showInputBox({
+    title: 'CodeBrain PR Review',
+    prompt: 'Base branch or ref for compare review',
+    placeHolder: 'main',
+    value: picked.mode.baseRef ?? defaultBaseRef,
+    validateInput: (value) => (value.trim().length === 0 ? 'Base ref is required.' : undefined),
+  });
+
+  if (!baseRef) {
+    return undefined;
+  }
+
+  return { scope: 'compare', baseRef: baseRef.trim() };
+}
+
+function getChangedFilesForReview(cwd: string, mode: PrReviewMode): string[] {
+  switch (mode.scope) {
+    case 'staged':
+      return getGitDiffFiles(cwd, ['diff', '--name-only', '--cached']);
+    case 'all':
+      return getGitDiffFiles(cwd, ['diff', '--name-only', 'HEAD']);
+    case 'compare':
+      return getGitDiffFiles(cwd, ['diff', '--name-only', `${mode.baseRef ?? 'main'}...HEAD`]);
+    default:
+      return [];
+  }
+}
+
+function getGitDiffFiles(cwd: string, args: string[]): string[] {
+  try {
+    const out = execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 10000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+
+    return out
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(0, 200);
+  } catch {
+    return [];
+  }
+}
+
+function getDefaultBaseRef(cwd: string): string {
+  const candidates = ['main', 'master'];
+  for (const candidate of candidates) {
+    if (gitRefExists(cwd, candidate)) {
+      return candidate;
+    }
+  }
+  return 'main';
+}
+
+function gitRefExists(cwd: string, ref: string): boolean {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', ref], {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildDetectChangesSummary(stdout: string, stderr: string): string {
+  const text = `${stdout}\n${stderr}`.trim();
+  if (text.length === 0) {
+    return '- No detect-changes output captured. Run the tool again in chat if needed.';
+  }
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, 20);
+
+  return lines.map((line) => `- ${line}`).join('\n');
 }

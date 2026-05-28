@@ -27,6 +27,10 @@ export interface ActiveContext {
   timestamp: number;
 }
 
+interface EnsureWorkspaceActiveContextOptions {
+  autoSelectSingle?: boolean;
+}
+
 const STORAGE_KEY = 'codebrain.activeContext';
 
 function normalizeFsPath(value: string): string {
@@ -214,9 +218,27 @@ export async function clearActiveContext(storage: vscode.Memento): Promise<void>
  */
 export async function ensureWorkspaceActiveContext(
   storage: vscode.Memento,
+  options: EnsureWorkspaceActiveContextOptions = {},
 ): Promise<ActiveContext | undefined> {
   const active = getActiveContext(storage);
   if (!active) {
+    if (!options.autoSelectSingle) {
+      return undefined;
+    }
+
+    const [repos, groups] = await Promise.all([listIndexedRepos(), listGroupsInWorkspace()]);
+
+    // Auto-select only when the workspace has a single unambiguous candidate.
+    if (repos.length === 1 && groups.length === 0) {
+      await setActiveContext(storage, 'repo', repos[0].name);
+      return getActiveContext(storage);
+    }
+
+    if (groups.length === 1 && repos.length === 0) {
+      await setActiveContext(storage, 'group', groups[0].name);
+      return getActiveContext(storage);
+    }
+
     return undefined;
   }
 
@@ -235,6 +257,22 @@ export async function ensureWorkspaceActiveContext(
   }
 
   await clearActiveContext(storage);
+
+  if (!options.autoSelectSingle) {
+    return undefined;
+  }
+
+  const repos = await listIndexedRepos();
+  if (repos.length === 1 && groups.length === 0) {
+    await setActiveContext(storage, 'repo', repos[0].name);
+    return getActiveContext(storage);
+  }
+
+  if (groups.length === 1 && repos.length === 0) {
+    await setActiveContext(storage, 'group', groups[0].name);
+    return getActiveContext(storage);
+  }
+
   return undefined;
 }
 

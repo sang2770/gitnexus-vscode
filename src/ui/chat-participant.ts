@@ -4,7 +4,7 @@ import { getOutputChannel } from '../process/cli-runner.js';
 
 const PARTICIPANT_ID = 'codebrain.gitnexus';
 
-type CommandMode = 'default' | 'explain' | 'impact' | 'debug' | 'refactor';
+type CommandMode = 'default' | 'explain' | 'impact' | 'debug' | 'refactor' | 'plan';
 
 type InstructionSectionKey =
   | 'yourRole'
@@ -139,7 +139,7 @@ export class GitNexusAgentParticipant {
 
   private normalizeCommand(request: vscode.ChatRequest): CommandMode {
     const command = (request.command ?? '').toLowerCase();
-    if (command === 'explain' || command === 'impact' || command === 'debug' || command === 'refactor') {
+    if (command === 'explain' || command === 'impact' || command === 'debug' || command === 'refactor' || command === 'plan') {
       return command;
     }
 
@@ -239,6 +239,9 @@ export class GitNexusAgentParticipant {
           'outputFormat',
         );
         break;
+      case 'plan':
+        selectedKeys.push('beforeAnyCodeChange', 'commandSpecificBehavior', 'whenExploringCode', 'outputFormat');
+        break;
       default:
         selectedKeys.push('beforeAnyCodeChange', 'commandSpecificBehavior', 'whenExploringCode');
         break;
@@ -309,6 +312,14 @@ export class GitNexusAgentParticipant {
           'When the user asks to implement changes, execute them directly with available tools (edit/create files) instead of only returning suggestions.',
           'Before changing symbols, run impact analysis and show key risk findings.',
           'After edits, summarize changed files and what was updated.',
+        ].join('\n');
+      case 'plan':
+        return [
+          'Slash command mode: /plan.',
+          'Build an execution plan by combining issue context and code intelligence.',
+          'If Jira/Atlassian MCP tools are available, fetch issue details first; otherwise state that clearly and proceed with available references.',
+          'Then run GitNexus query/context/impact tools to map code scope and risk before proposing implementation steps.',
+          'Output must include: Analysis Brief, GitNexus Findings, Execution Plan, Decision, Jira Comment Draft.',
         ].join('\n');
       default:
         return [
@@ -624,6 +635,7 @@ export class GitNexusAgentParticipant {
         '`@CodeBrain /impact UserService.authenticate`',
         '`@CodeBrain /debug Login intermittently times out`',
         '`@CodeBrain /refactor Rename parseConfig to parseWorkspaceConfig`',
+        '`@CodeBrain /plan PROJ-123 checkout latency incident`',
       ],
       explain: [
         '`@CodeBrain /explain src/ui/chat-participant.ts`',
@@ -640,6 +652,10 @@ export class GitNexusAgentParticipant {
       refactor: [
         '`@CodeBrain /refactor extract instruction parsing into a helper`',
         '`@CodeBrain /refactor rename GitNexusAgentParticipant to CodeBrainChatParticipant`',
+      ],
+      plan: [
+        '`@CodeBrain /plan PROJ-123`',
+        '`@CodeBrain /plan Build implementation plan for checkout timeout spikes`',
       ],
     };
 
@@ -725,6 +741,10 @@ export class GitNexusAgentParticipant {
           refactor: [
             { label: 'Verify scope', prompt: 'Verify the changed scope and summarize affected execution flows.', command: 'impact' },
             { label: 'Explain changes', prompt: 'Explain what changed and why it is safe.', command: 'explain' },
+          ],
+          plan: [
+            { label: 'Run impact checks', prompt: 'Run impact analysis for each symbol in the plan and report risk.', command: 'impact' },
+            { label: 'Draft Jira update', prompt: 'Turn this plan into a Jira comment with risks, owners, and test checklist.', command: 'plan' },
           ],
         };
 

@@ -26,6 +26,7 @@ import {
 } from "./commands/group.js";
 import {
   queryCommand,
+  jiraPlanAndQueryCommand,
   wikiCommand,
   serveCommand,
   prReviewCommand,
@@ -46,6 +47,7 @@ import {
   initializeCodeBrainRuntime,
 } from "./process/cli-runner.js";
 import { syncActiveContextSkill } from "./process/active-context-skill.js";
+import { ensureWorkspaceActiveContext } from "./process/group-context.js";
 
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = getOutputChannel();
@@ -74,6 +76,17 @@ export function activate(context: vscode.ExtensionContext): void {
   const quickActionsProvider = new QuickActionsTreeProvider();
   const agentsProvider = new AgentsTreeProvider();
   const groupsReposProvider = new GroupsReposTreeProvider(context.globalState);
+
+  void (async () => {
+    const resolved = await ensureWorkspaceActiveContext(context.globalState, {
+      autoSelectSingle: true,
+    });
+    if (resolved) {
+      await syncActiveContextSkill(context.globalState);
+      statusBar.refreshContext();
+      groupsReposProvider.refresh();
+    }
+  })();
 
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider(
@@ -144,7 +157,8 @@ export function activate(context: vscode.ExtensionContext): void {
     ["codebrain.openDashboard", () => openDashboardCommand(context)],
     ["codebrain.generateWiki", wikiCommand],
     ["codebrain.query", () => queryCommand(context)],
-    ["codebrain.prReview", prReviewCommand],
+    ["codebrain.jiraPlanAndQuery", () => jiraPlanAndQueryCommand(context)],
+    ["codebrain.prReview", () => prReviewCommand(context)],
 
     // Group & Context commands
     [

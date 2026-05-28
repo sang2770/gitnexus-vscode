@@ -93,6 +93,12 @@
         "icon": "$(search)"
       },
       {
+        "command": "codebrain.jiraPlanAndQuery",
+        "title": "Jira Plan + GitNexus Query",
+        "category": "CodeBrain",
+        "icon": "$(note)"
+      },
+      {
         "command": "codebrain.prReview",
         "title": "PR Review with CodeBrain",
         "category": "CodeBrain",
@@ -304,6 +310,10 @@
           {
             "name": "explain",
             "description": "Explore code and understand execution flows"
+          },
+          {
+            "name": "plan",
+            "description": "Build a Jira-to-implementation plan with Atlassian + GitNexus MCP"
           }
         ]
       }

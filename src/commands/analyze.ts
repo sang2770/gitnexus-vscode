@@ -1,12 +1,16 @@
-﻿import * as vscode from 'vscode';
-import { ensureCodeBrainCli } from '../process/prerequisites.js';
-import { runCodeBrain, getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
+﻿import * as vscode from "vscode";
+import { ensureCodeBrainCli } from "../process/prerequisites.js";
+import {
+  runCodeBrain,
+  getOutputChannel,
+  getWorkspaceRoot,
+} from "../process/cli-runner.js";
 import {
   getActiveContext,
   getActiveRepoPath,
   getGroupDetails,
   listIndexedRepos,
-} from '../process/group-context.js';
+} from "../process/group-context.js";
 
 export interface AnalyzeOptions {
   force?: boolean;
@@ -31,7 +35,7 @@ function normalizeName(value: string): string {
 }
 
 function normalizePathLike(value: string): string {
-  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
 function findRepoByRegistryOrGroupPath(
@@ -40,7 +44,9 @@ function findRepoByRegistryOrGroupPath(
   groupPath?: string,
 ): { name: string; path: string } | undefined {
   const normalizedRegistryName = normalizeName(registryName);
-  const byName = repos.find((repo) => normalizeName(repo.name) === normalizedRegistryName);
+  const byName = repos.find(
+    (repo) => normalizeName(repo.name) === normalizedRegistryName,
+  );
   if (byName) {
     return byName;
   }
@@ -64,19 +70,20 @@ function buildAnalyzeArgs(
   opts: AnalyzeOptions,
   config: vscode.WorkspaceConfiguration,
 ): string[] {
-  const args: string[] = ['analyze', targetPath, '--ide', 'vscode'];
+  const args: string[] = ["analyze", targetPath, "--ide", "vscode"];
   if (opts.force) {
-    args.push('--force');
+    args.push("--force");
   }
-  const useEmbeddings = opts.embeddings ?? config.get<boolean>('analyze.embeddings', false);
+  const useEmbeddings =
+    opts.embeddings ?? config.get<boolean>("analyze.embeddings", false);
   if (useEmbeddings) {
-    args.push('--embeddings');
+    args.push("--embeddings");
   }
   if (opts.skipAgentsMd) {
-    args.push('--skip-agents-md');
+    args.push("--skip-agents-md");
   }
   if (opts.verbose) {
-    args.push('--verbose');
+    args.push("--verbose");
   }
   return args;
 }
@@ -92,7 +99,9 @@ async function resolveAnalyzeTargets(
   if (opts.groupName) {
     const group = await getGroupDetails(opts.groupName);
     if (!group) {
-      vscode.window.showErrorMessage(`GitNexus: Group "${opts.groupName}" not found.`);
+      vscode.window.showErrorMessage(
+        `GitNexus: Group "${opts.groupName}" not found.`,
+      );
       return [];
     }
 
@@ -100,7 +109,11 @@ async function resolveAnalyzeTargets(
     const seenPaths = new Set<string>();
     const targets = Object.entries(group.repos)
       .map(([groupPath, registryName]) => {
-        const repo = findRepoByRegistryOrGroupPath(repos, registryName, groupPath);
+        const repo = findRepoByRegistryOrGroupPath(
+          repos,
+          registryName,
+          groupPath,
+        );
         if (!repo || seenPaths.has(repo.path)) {
           return undefined;
         }
@@ -119,20 +132,30 @@ async function resolveAnalyzeTargets(
   }
 
   const workspaceRoot = getWorkspaceRoot();
-  const activeRepoPath = context ? await getActiveRepoPath(context.globalState) : undefined;
-  const activeContext = context ? getActiveContext(context.globalState) : undefined;
+  const activeRepoPath = context
+    ? await getActiveRepoPath(context.globalState)
+    : undefined;
+  const activeContext = context
+    ? getActiveContext(context.globalState)
+    : undefined;
 
-  if (!activeRepoPath && activeContext?.type === 'group') {
-    return resolveAnalyzeTargets({ ...opts, groupName: activeContext.name }, context);
+  if (!activeRepoPath && activeContext?.type === "group") {
+    return resolveAnalyzeTargets(
+      { ...opts, groupName: activeContext.name },
+      context,
+    );
   }
 
   let targetPath = activeRepoPath ?? workspaceRoot;
   if (!activeRepoPath) {
     const folders = vscode.workspace.workspaceFolders;
     if (folders && folders.length > 1) {
-      const items = folders.map((f) => ({ label: f.name, description: f.uri.fsPath }));
+      const items = folders.map((f) => ({
+        label: f.name,
+        description: f.uri.fsPath,
+      }));
       const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select workspace folder to analyze',
+        placeHolder: "Select workspace folder to analyze",
       });
       if (!picked) {
         return [];
@@ -153,7 +176,7 @@ export async function analyzeCommand(
     return false;
   }
 
-  const config = vscode.workspace.getConfiguration('codebrain');
+  const config = vscode.workspace.getConfiguration("codebrain");
   const channel = getOutputChannel();
   channel.show(true);
 
@@ -167,7 +190,10 @@ export async function analyzeCommand(
   return vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: totalTargets > 1 ? `CodeBrain: Analyzing ${totalTargets} repositories...` : 'CodeBrain: Analyzing...',
+      title:
+        totalTargets > 1
+          ? `CodeBrain: Analyzing ${totalTargets} repositories...`
+          : "CodeBrain: Analyzing...",
       cancellable: true,
     },
     async (progress, token) => {
@@ -178,30 +204,51 @@ export async function analyzeCommand(
           increment: i === 0 ? 0 : 100 / totalTargets,
         });
 
-        const result = await runCodeBrain(buildAnalyzeArgs(target.path, opts, config), {
-          cwd: target.path,
-          stream: true,
-          token,
-        });
+        const result = await runCodeBrain(
+          buildAnalyzeArgs(target.path, opts, config),
+          {
+            cwd: target.path,
+            stream: true,
+            token,
+          },
+        );
         if (token.isCancellationRequested) {
-          vscode.window.showWarningMessage('GitNexus: Analyze cancelled.');
+          vscode.window.showWarningMessage("GitNexus: Analyze cancelled.");
           return false;
         }
         if (result.exitCode !== 0) {
           vscode.window
             .showErrorMessage(
               `GitNexus: Analyze failed for ${target.label}. Check the Output panel for details.`,
-              'Show Output',
+              "Show Output",
             )
-            .then((c) => c === 'Show Output' && channel.show());
+            .then((c) => c === "Show Output" && channel.show());
           return false;
         }
       }
 
       if (totalTargets > 1) {
-        vscode.window.showInformationMessage(`GitNexus: Indexed ${totalTargets} repositories successfully.`);
+        vscode.window.showInformationMessage(
+          `GitNexus: Indexed ${totalTargets} repositories successfully.`,
+        );
       } else {
-        vscode.window.showInformationMessage('GitNexus: Repository indexed successfully.');
+        vscode.window.showInformationMessage(
+          "GitNexus: Repository indexed successfully.",
+        );
+      }
+
+      // If analyzing a group directly, sync it after all repos are done
+      if (opts.groupName) {
+        const groupName = opts.groupName;
+
+        const channel = getOutputChannel();
+        channel.appendLine(`\nAuto-syncing group: ${groupName}...`);
+        const result = await runCodeBrain(["group", "sync", groupName]);
+        if (result.exitCode === 0) {
+          channel.appendLine(`✓ Group synced: ${groupName}`);
+        } else {
+          channel.appendLine(`✗ Failed to sync group: ${groupName}`);
+        }
       }
       return true;
     },
@@ -216,7 +263,7 @@ export async function analyzeTreeItemCommand(
     return analyzeCommand({}, context);
   }
 
-  if (typeof node === 'string') {
+  if (typeof node === "string") {
     return analyzeCommand({ groupName: node }, context);
   }
 
@@ -225,7 +272,11 @@ export async function analyzeTreeItemCommand(
   // repo-in-group: has groupName + registryName
   if (meta.groupName && meta.registryName) {
     const repos = await listIndexedRepos({ includeOutsideWorkspace: true });
-    const repo = findRepoByRegistryOrGroupPath(repos, meta.registryName, meta.groupPath);
+    const repo = findRepoByRegistryOrGroupPath(
+      repos,
+      meta.registryName,
+      meta.groupPath,
+    );
     if (!repo) {
       vscode.window.showWarningMessage(
         `GitNexus: Repository "${meta.registryName}" is not indexed.`,
@@ -237,22 +288,26 @@ export async function analyzeTreeItemCommand(
 
   if (meta.name) {
     // Use nodeType to avoid group/repo name collision
-    if (meta.nodeType === 'group') {
+    if (meta.nodeType === "group") {
       const group = await getGroupDetails(meta.name);
       if (group) {
         return analyzeCommand({ groupName: group.name }, context);
       }
-      vscode.window.showWarningMessage(`GitNexus: Group "${meta.name}" not found.`);
+      vscode.window.showWarningMessage(
+        `GitNexus: Group "${meta.name}" not found.`,
+      );
       return false;
     }
 
-    if (meta.nodeType === 'repo') {
+    if (meta.nodeType === "repo") {
       const repos = await listIndexedRepos();
       const repo = repos.find((r) => r.name === meta.name);
       if (repo) {
         return analyzeCommand({ path: repo.path }, context);
       }
-      vscode.window.showWarningMessage(`GitNexus: Repository "${meta.name}" not found in workspace.`);
+      vscode.window.showWarningMessage(
+        `GitNexus: Repository "${meta.name}" not found in workspace.`,
+      );
       return false;
     }
 
