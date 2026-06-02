@@ -1,58 +1,60 @@
 ﻿import * as vscode from "vscode";
-import { setupCommand, installCliCommand } from "./commands/setup.js";
 import {
   type AnalyzeOptions,
   analyzeCommand,
-  analyzeForceCommand,
-  analyzeTreeItemCommand,
-  analyzeWithEmbeddingsCommand,
+  analyzeTreeItemCommand
 } from "./commands/analyze.js";
 import {
-  cleanCommand,
   cleanAllCommand,
-  statusCommand,
+  cleanCommand,
   listReposCommand,
+  statusCommand,
 } from "./commands/clean.js";
+import { CodeBrainEditFilesTool } from "./tools/edit-files-tool.js";
 import {
-  selectRepoCommand,
-  selectGroupCommand,
-  repoMenuCommand,
-  createGroupCommand,
-  syncGroupCommand,
-  clearActivationCommand,
-  showActiveContextCommand,
   addRepoToGroupCommand,
+  clearActivationCommand,
+  createGroupCommand,
   removeRepoFromGroupCommand,
+  repoMenuCommand,
+  selectGroupCommand,
+  selectRepoCommand,
+  showActiveContextCommand,
+  syncGroupCommand,
 } from "./commands/group.js";
 import {
-  queryCommand,
   jiraPlanAndQueryCommand,
-  wikiCommand,
-  serveCommand,
-  prReviewCommand,
   openDashboardCommand,
+  prReviewCommand,
+  queryCommand,
+  serveCommand,
+  wikiCommand,
 } from "./commands/misc.js";
+import { installCliCommand, setupCommand } from "./commands/setup.js";
 import { runStartupHealthCheck } from "./config/startup-health-check.js";
-import { CodeBrainStatusBar } from "./ui/status-bar.js";
-import { StalenessMonitor } from "./staleness/staleness-monitor.js";
-import {
-  QuickActionsTreeProvider,
-  AgentsTreeProvider,
-  GroupsReposTreeProvider,
-} from "./ui/tree-view.js";
-import { createGitNexusParticipant } from "./ui/chat-participant.js";
+import { syncActiveContextSkill } from "./process/active-context-skill.js";
 import {
   getOutputChannel,
   getWorkspaceRoot,
   initializeCodeBrainRuntime,
 } from "./process/cli-runner.js";
-import { syncActiveContextSkill } from "./process/active-context-skill.js";
 import { ensureWorkspaceActiveContext } from "./process/group-context.js";
+import { StalenessMonitor } from "./staleness/staleness-monitor.js";
+import { createGitNexusParticipant } from "./ui/chat-participant.js";
+import { CodeBrainStatusBar } from "./ui/status-bar.js";
+import {
+  AgentsTreeProvider,
+  GroupsReposTreeProvider,
+  QuickActionsTreeProvider,
+} from "./ui/tree-view.js";
 
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = getOutputChannel();
   initializeCodeBrainRuntime(context.globalStorageUri.fsPath);
   void syncActiveContextSkill(context.globalState);
+  context.subscriptions.push(
+    vscode.lm.registerTool("codebrain_editFiles", new CodeBrainEditFilesTool()),
+  );
 
   // ----------------------------------------------------------------
   // Status bar

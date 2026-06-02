@@ -1,4 +1,6 @@
 ﻿import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { ensureCodeBrainCli } from "../process/prerequisites.js";
 import {
   runCodeBrain,
@@ -73,6 +75,10 @@ function buildAnalyzeArgs(
   const args: string[] = ["analyze", targetPath, "--ide", "vscode"];
   if (opts.force) {
     args.push("--force");
+  }
+  const hasGit = fs.existsSync(path.join(targetPath, ".git"));
+  if (!hasGit) {
+    args.push("--skip-git");
   }
   const useEmbeddings =
     opts.embeddings ?? config.get<boolean>("analyze.embeddings", false);

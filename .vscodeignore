@@ -32,6 +32,7 @@ scripts
 # Documentation
 CONTRIBUTING.md
 *.md
+!gitnexus-chat-participant.instructions.md
 
 # Hidden files
 .github
