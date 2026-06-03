@@ -317,6 +317,69 @@
           }
         ]
       }
+    ],
+    "languageModelTools": [
+      {
+        "name": "codebrain_editFiles",
+        "displayName": "CodeBrain Edit Files",
+        "toolReferenceName": "codebrainEdit",
+        "modelDescription": "Edit a text file in the workspace. Use this tool to create or update files by replacing full content or by applying exact oldText/newText edits. Use workspace-relative or absolute filePath. Prefer specific oldText snippets to avoid ambiguous matches.",
+        "userDescription": "Create or edit workspace files",
+        "canBeReferencedInPrompt": true,
+        "tags": [
+          "codebrain",
+          "edit",
+          "files",
+          "workspace"
+        ],
+        "icon": "$(edit)",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "description": "Absolute or workspace-relative path to the target file."
+            },
+            "createIfMissing": {
+              "type": "boolean",
+              "description": "Create parent folders and file when it does not exist.",
+              "default": false
+            },
+            "newContent": {
+              "type": "string",
+              "description": "If provided, replace entire file contents with this text."
+            },
+            "edits": {
+              "type": "array",
+              "description": "Exact string replacement operations applied in order.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "oldText": {
+                    "type": "string",
+                    "description": "Exact text to find in the file."
+                  },
+                  "newText": {
+                    "type": "string",
+                    "description": "Replacement text for oldText."
+                  },
+                  "replaceAll": {
+                    "type": "boolean",
+                    "description": "Replace every occurrence of oldText if true."
+                  }
+                },
+                "required": [
+                  "oldText",
+                  "newText"
+                ]
+              }
+            }
+          },
+          "required": [
+            "filePath"
+          ]
+        }
+      }
     ]
   },
   "scripts": {
@@ -333,17 +396,17 @@
     "bundle:cli": "node scripts/copy-cli.mjs",
     "package": "npm run build:ext && vsce package --allow-missing-repository --out codebrain-vscode.vsix"
   },
-  "dependencies": {
-    "@vscode/chat-extension-utils": "^0.0.0-alpha.5"
-  },
   "devDependencies": {
     "@types/node": "^20.19.39",
-    "@types/vscode": "^1.99.0",
+    "@types/vscode": "^1.100.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "sharp": "^0.33.5",
     "typescript": "^5.4.0",
     "vsce": "*"
+  },
+  "dependencies": {
+    "@dqbd/tiktoken": "^1.0.22"
   }
 }

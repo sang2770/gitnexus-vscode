@@ -13,21 +13,6 @@ type CommandMode =
   | "refactor"
   | "plan";
 
-type InstructionSectionKey =
-  | "yourRole"
-  | "beforeAnyCodeChange"
-  | "commandSpecificBehavior"
-  | "beforeRenaming"
-  | "beforeExtractingOrSplittingCode"
-  | "beforeCommitting"
-  | "whenDebugging"
-  | "whenExploringCode"
-  | "absoluteProhibitions"
-  | "outputFormat"
-  | "userCommunication";
-
-type InstructionMap = Partial<Record<InstructionSectionKey, string>>;
-
 type GitNexusToolKind =
   | "query"
   | "context"
@@ -37,18 +22,12 @@ type GitNexusToolKind =
   | "cypher"
   | "list_repos";
 
-const SECTION_TITLE_TO_KEY: Record<string, InstructionSectionKey> = {
-  "your role": "yourRole",
-  "before any code change": "beforeAnyCodeChange",
-  "command-specific behavior": "commandSpecificBehavior",
-  "before renaming": "beforeRenaming",
-  "before extracting/splitting code": "beforeExtractingOrSplittingCode",
-  "before committing": "beforeCommitting",
-  "when debugging": "whenDebugging",
-  "when exploring code": "whenExploringCode",
-  "absolute prohibitions": "absoluteProhibitions",
-  "output format": "outputFormat",
-  "user communication": "userCommunication",
+type InputTokenEstimate = {
+  total: number;
+  messageTokens: number;
+  toolTokens: number;
+  messageCount: number;
+  toolCount: number;
 };
 
 const READ_ONLY_TOOL_KEYWORDS = [
@@ -108,6 +87,10 @@ const MUTATING_TOOL_KEYWORDS = [
 const EDIT_INTENT_PATTERN =
   /\b(add|apply|change|create|delete|edit|extract|fix|implement|move|patch|refactor|remove|rename|replace|split|update|write)\b/i;
 const MAX_TOOL_CALL_ROUNDS = 5;
+const MAX_CHAT_HISTORY_TURNS = 4;
+const MAX_HISTORY_RESPONSE_CHARS = 800;
+const MAX_SELECTED_TOOLS = 24;
+const TOKEN_ESTIMATE_FALLBACK_CHARS_PER_TOKEN = 4;
 const GITNEXUS_TOOL_NAME_HINTS = ["mcp_gitnexus", "gitnexus"];
 const STRICT_GITNEXUS_WORKFLOWS: Partial<
   Record<CommandMode, GitNexusToolKind[]>
@@ -156,44 +139,10 @@ const GITNEXUS_MUTATING_TOOL_NAME_HINTS = [
   "sync",
 ];
 
-const FALLBACK_INSTRUCTIONS: InstructionMap = {
-  yourRole: [
-    "You are a GitNexus code-intelligence assistant powered by the GitNexus knowledge graph.",
-    "Use available GitNexus tools to explain code structure, impact, refactoring, and debugging.",
-  ].join("\n"),
-  beforeAnyCodeChange: [
-    "Before code changes: identify the target symbol, run GitNexus context and upstream impact checks, report direct callers (d=1), and warn on HIGH or CRITICAL risk.",
-  ].join("\n"),
-  commandSpecificBehavior: [
-    "/explain: run query -> context, then explain execution and data flow.",
-    "/impact: run context -> impact, then summarize d-level, blast radius, call graph, and risk.",
-    "/debug: run query -> context, trace root cause, then propose or apply the smallest safe fix only if asked.",
-    "/refactor: run context -> impact, evaluate risk, then apply requested edits and verify scope.",
-    "/plan: run query -> impact, then produce a decision-ready implementation plan.",
-  ].join("\n"),
-  beforeRenaming: "Use rename with dry_run before any rename.",
-  beforeExtractingOrSplittingCode:
-    "Before extraction or moves, run context and upstream impact checks and handle all direct dependents.",
-  beforeCommitting:
-    "Before commit guidance, run detect_changes(scope: all) and verify scope.",
-  whenDebugging:
-    "Use query for symptoms, inspect execution flows, then use context on suspect symbols.",
-  whenExploringCode:
-    "Use query for concepts and context for symbol relationships and execution flow.",
-  absoluteProhibitions: [
-    "Never rename with find-and-replace; use rename.",
-    "Never ignore HIGH or CRITICAL impact warnings.",
-    "Never suggest commits without detect_changes.",
-  ].join("\n"),
-  outputFormat:
-    "Always respond with these sections: ## 🧩 Context, ## 🔍 Findings, ## ⚠️ Impact / Risk, ## ✅ Recommendation / Action, ## 🧠 Self-check.",
-  userCommunication:
-    "Be direct, actionable, transparent about tool results, and explicit about risks.",
-};
+const PLAN_TOOL_HINTS = ["atlassian", "jira"];
 
 export class GitNexusAgentParticipant {
   private readonly context: vscode.ExtensionContext;
-  private instructionSectionsCache?: InstructionMap;
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -227,138 +176,55 @@ export class GitNexusAgentParticipant {
     return EDIT_INTENT_PATTERN.test(prompt);
   }
 
-  private parseInstructionSections(raw: string): InstructionMap {
-    const sections: InstructionMap = {};
-    const lines = raw.split(/\r?\n/);
-    let currentKey: InstructionSectionKey | undefined;
-    let buffer: string[] = [];
-
-    const flush = () => {
-      if (!currentKey) {
-        buffer = [];
-        return;
-      }
-
-      const value = buffer.join("\n").trim();
-      if (value) {
-        sections[currentKey] = value;
-      }
-      buffer = [];
-    };
-
-    for (const line of lines) {
-      const sectionMatch = line.match(/^###\s+(.*)$/);
-      if (sectionMatch) {
-        flush();
-        currentKey = SECTION_TITLE_TO_KEY[sectionMatch[1].trim().toLowerCase()];
-        continue;
-      }
-
-      const majorSectionMatch = line.match(/^##\s+(.*)$/);
-      if (majorSectionMatch) {
-        flush();
-        currentKey =
-          SECTION_TITLE_TO_KEY[majorSectionMatch[1].trim().toLowerCase()];
-        continue;
-      }
-
-      if (currentKey) {
-        buffer.push(line);
-      }
-    }
-
-    flush();
-    return sections;
-  }
-
-  private async getInstructionSections(): Promise<InstructionMap> {
-    if (this.instructionSectionsCache) {
-      return this.instructionSectionsCache;
-    }
-
-    try {
-      const uri = vscode.Uri.joinPath(
-        this.context.extensionUri,
-        "gitnexus-chat-participant.instructions.md",
-      );
-      const raw = await vscode.workspace.fs.readFile(uri);
-      this.instructionSectionsCache = {
-        ...FALLBACK_INSTRUCTIONS,
-        ...this.parseInstructionSections(Buffer.from(raw).toString("utf8")),
-      };
-    } catch {
-      this.instructionSectionsCache = FALLBACK_INSTRUCTIONS;
-    }
-
-    return this.instructionSectionsCache;
-  }
-
-  private buildRelevantInstructions(
-    sections: InstructionMap,
-    request: vscode.ChatRequest,
-  ): string {
+  private buildRelevantInstructions(request: vscode.ChatRequest): string {
     const command = this.normalizeCommand(request);
-    const selectedKeys: InstructionSectionKey[] = [
-      "yourRole",
-      "absoluteProhibitions",
-      "userCommunication",
+    const editIntent = this.promptLooksLikeEditRequest(request.prompt);
+    const base = [
+      "You are CodeBrain, a GitNexus code-intelligence assistant.",
+      "Use GitNexus tools for code structure, execution flow, impact, refactoring, and debugging.",
+      "Before code edits: identify the target symbol, run context then upstream impact, report d=1 dependents, and warn on HIGH or CRITICAL risk.",
+      "Before commit guidance or after edits, use detect_changes when available.",
+      "Answer with concise headings: Context, Findings, Impact / Risk, Recommendation / Action, Self-check.",
     ];
 
     switch (command) {
       case "explain":
-        selectedKeys.push(
-          "commandSpecificBehavior",
-          "whenExploringCode",
-          "outputFormat",
+        base.push(
+          "/explain: read-only by default; run query then context, then explain the main relationships and flow.",
         );
         break;
       case "impact":
-        selectedKeys.push(
-          "beforeAnyCodeChange",
-          "commandSpecificBehavior",
-          "outputFormat",
+        base.push(
+          "/impact: run context then impact; summarize direct dependents, indirect risk, blast radius, and confidence.",
         );
         break;
       case "debug":
-        selectedKeys.push(
-          "beforeAnyCodeChange",
-          "commandSpecificBehavior",
-          "whenDebugging",
-          "outputFormat",
+        base.push(
+          editIntent
+            ? "/debug: diagnose with query/context first, then apply the smallest targeted fix."
+            : "/debug: diagnose with query/context and stay read-only unless the user asks for a fix.",
         );
         break;
       case "refactor":
-        selectedKeys.push(
-          "beforeAnyCodeChange",
-          "commandSpecificBehavior",
-          "beforeRenaming",
-          "beforeExtractingOrSplittingCode",
-          "beforeCommitting",
-          "outputFormat",
+        base.push(
+          "/refactor: run context then impact before edits; for renames use rename dry_run before applying.",
         );
         break;
       case "plan":
-        selectedKeys.push(
-          "beforeAnyCodeChange",
-          "commandSpecificBehavior",
-          "whenExploringCode",
-          "outputFormat",
+        base.push(
+          "/plan: use query then impact to produce a decision-ready plan with risks and tests.",
         );
         break;
       default:
-        selectedKeys.push(
-          "beforeAnyCodeChange",
-          "commandSpecificBehavior",
-          "whenExploringCode",
+        base.push(
+          editIntent
+            ? "No slash command: if implementation is requested, perform GitNexus safety checks before tool-based edits."
+            : "No slash command: prefer read-only GitNexus exploration first.",
         );
         break;
     }
 
-    const uniqueKeys = [...new Set(selectedKeys)];
-    return uniqueKeys
-      .map((key) => sections[key]?.trim())
-      .filter((value): value is string => Boolean(value))
-      .join("\n\n");
+    return base.join("\n");
   }
 
   /**
@@ -392,68 +258,45 @@ export class GitNexusAgentParticipant {
   private buildCommandPrompt(request: vscode.ChatRequest): string {
     const command = this.normalizeCommand(request);
     const editIntent = this.promptLooksLikeEditRequest(request.prompt);
-    const gitNexusFirstPolicy = [
-      "Strict GitNexus-first policy: run the required GitNexus graph tools before reasoning from memory or generic search.",
-      "Standard workflow: Context -> Analysis/tool call -> Insight -> Action -> Self-check.",
-      "Standard output headings: ## 🧩 Context, ## 🔍 Findings, ## ⚠️ Impact / Risk, ## ✅ Recommendation / Action, ## 🧠 Self-check.",
-      "Use detect_changes before commit guidance or after edits. If a GitNexus tool is unavailable or fails, state that in Self-check instead of pretending graph analysis succeeded.",
-      "Always explain d-level, blast radius, call graph, and risk when impact output is available.",
-    ].join("\n");
-
     switch (command) {
       case "explain":
         return [
-          "Slash command mode: /explain.",
-          "Focus on understanding and explanation only.",
-          "Required GitNexus sequence: query -> context.",
-          "Build the main execution flow and data flow from GitNexus results.",
-          "Do not create or edit files unless user explicitly asks to modify code.",
-          gitNexusFirstPolicy,
+          "Mode: /explain.",
+          "Required tool order: query -> context.",
+          "Do not edit files unless explicitly asked.",
         ].join("\n");
       case "impact":
         return [
-          "Slash command mode: /impact.",
-          "Required GitNexus sequence: context -> impact.",
-          "Report target symbol, direct dependents (d=1), indirect dependents, fan-out, blast radius, call graph, and risk level.",
-          "If risk is HIGH or CRITICAL, clearly warn before proposing changes.",
-          gitNexusFirstPolicy,
+          "Mode: /impact.",
+          "Required tool order: context -> impact.",
+          "Report d-levels, blast radius, confidence, and risk.",
         ].join("\n");
       case "debug":
         return [
-          "Slash command mode: /debug.",
-          "Required GitNexus sequence: query -> context.",
-          "Prioritize root-cause analysis, execution flow tracing, and minimal-risk fixes.",
+          "Mode: /debug.",
+          "Required tool order: query -> context.",
           editIntent
-            ? "The prompt appears to ask for a fix. Diagnose first, then apply small targeted edits with tools and explain why."
-            : "The prompt appears diagnostic. Stay read-only unless the user explicitly asks for a fix.",
-          gitNexusFirstPolicy,
+            ? "After diagnosis, use the smallest targeted edit."
+            : "Stay read-only unless a fix is requested.",
         ].join("\n");
       case "refactor":
         return [
-          "Slash command mode: /refactor.",
-          "This mode is action-oriented.",
-          "Required GitNexus sequence before edits: context -> impact.",
-          "When the user asks to implement changes, execute them directly with available tools (edit/create files) instead of only returning suggestions.",
-          "Before changing symbols, show d=1 risk findings. After edits, summarize changed files, actions taken, and any verification gaps.",
-          gitNexusFirstPolicy,
+          "Mode: /refactor.",
+          "Required tool order before edits: context -> impact.",
+          "When edits are requested, execute them and summarize changed files plus verification gaps.",
         ].join("\n");
       case "plan":
         return [
-          "Slash command mode: /plan.",
-          "Build an execution plan by combining issue context and code intelligence.",
-          "If Jira/Atlassian MCP tools are available, fetch issue details first; otherwise state that clearly and proceed with available references.",
-          "Required GitNexus sequence: query -> impact.",
-          "Map code scope and risk before proposing implementation steps.",
-          gitNexusFirstPolicy,
+          "Mode: /plan.",
+          "Required tool order: query -> impact.",
+          "Use Jira/Atlassian only when available or attached; otherwise state the gap.",
         ].join("\n");
       default:
         return [
           "No slash command selected.",
-          "Infer intent from the prompt and choose tools accordingly.",
           editIntent
-            ? "The prompt appears to request implementation. Use tools to perform the change after required GitNexus safety checks. Prefer codebrain_editFiles for deterministic file edits when available."
-            : "The prompt does not clearly request implementation. Prefer read-only exploration and ask for confirmation before edits.",
-          gitNexusFirstPolicy,
+            ? "Intent: implementation; run GitNexus safety checks before deterministic file edits."
+            : "Intent: exploration; prefer read-only GitNexus tools.",
         ].join("\n");
     }
   }
@@ -649,6 +492,81 @@ export class GitNexusAgentParticipant {
     return GITNEXUS_TOOL_NAME_HINTS.some((hint) => haystack.includes(hint));
   }
 
+  private isCodeBrainTool(tool: vscode.LanguageModelToolInformation): boolean {
+    return this.normalizeToolName(tool.name).startsWith("codebrain_");
+  }
+
+  private isPlanContextTool(
+    tool: vscode.LanguageModelToolInformation,
+  ): boolean {
+    const haystack = this.getToolSearchText(tool).toLowerCase();
+    return PLAN_TOOL_HINTS.some((hint) => haystack.includes(hint));
+  }
+
+  private dedupeTools(
+    tools: vscode.LanguageModelToolInformation[],
+  ): vscode.LanguageModelToolInformation[] {
+    const seen = new Set<string>();
+    return tools.filter((tool) => {
+      if (seen.has(tool.name)) {
+        return false;
+      }
+      seen.add(tool.name);
+      return true;
+    });
+  }
+
+  private getToolPriority(
+    tool: vscode.LanguageModelToolInformation,
+    request: vscode.ChatRequest,
+  ): number {
+    let score = 0;
+    const command = this.normalizeCommand(request);
+
+    if (request.toolReferences.some((ref) => ref.name === tool.name)) {
+      score += 1000;
+    }
+
+    if (this.isGitNexusTool(tool)) {
+      score += 100;
+      const workflow = STRICT_GITNEXUS_WORKFLOWS[command] ?? [];
+      const workflowIndex = workflow.findIndex(
+        (kind) =>
+          this.gitNexusToolNameMatchesKind(tool, kind) ||
+          this.gitNexusToolDescriptionMatchesKind(tool, kind),
+      );
+      if (workflowIndex >= 0) {
+        score += 30 - workflowIndex;
+      }
+    }
+
+    if (this.isCodeBrainTool(tool)) {
+      score += 80;
+    }
+
+    if (command === "plan" && this.isPlanContextTool(tool)) {
+      score += 70;
+    }
+
+    return score;
+  }
+
+  private sortToolsByPriority(
+    tools: vscode.LanguageModelToolInformation[],
+    request: vscode.ChatRequest,
+  ): vscode.LanguageModelToolInformation[] {
+    return [...tools].sort((left, right) => {
+      const priorityDelta =
+        this.getToolPriority(right, request) -
+        this.getToolPriority(left, request);
+      if (priorityDelta !== 0) {
+        return priorityDelta;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+  }
+
   private shouldPreferGitNexusFirstRound(request: vscode.ChatRequest): boolean {
     const command = this.normalizeCommand(request);
     if (
@@ -662,6 +580,60 @@ export class GitNexusAgentParticipant {
     }
 
     return !this.promptLooksLikeEditRequest(request.prompt);
+  }
+
+  private requestAllowsMutatingTools(request: vscode.ChatRequest): boolean {
+    const command = this.normalizeCommand(request);
+    const editIntent = this.promptLooksLikeEditRequest(request.prompt);
+    return (
+      command === "refactor" ||
+      (command === "debug" && editIntent) ||
+      (command === "default" && editIntent)
+    );
+  }
+
+  private isPostStrictWorkflowRound(
+    request: vscode.ChatRequest,
+    round: number,
+  ): boolean {
+    const workflow = STRICT_GITNEXUS_WORKFLOWS[this.normalizeCommand(request)];
+    return Boolean(workflow && workflow.length > 0 && round >= workflow.length);
+  }
+
+  private selectContinuationTools(
+    allTools: vscode.LanguageModelToolInformation[],
+    request: vscode.ChatRequest,
+  ): vscode.LanguageModelToolInformation[] {
+    if (!this.requestAllowsMutatingTools(request)) {
+      return [];
+    }
+
+    const selectedTools = allTools.filter((tool) => this.isCodeBrainTool(tool));
+    const detectChangesTool = this.selectGitNexusToolByKind(
+      allTools,
+      "detect_changes",
+    );
+    if (detectChangesTool) {
+      selectedTools.push(detectChangesTool);
+    }
+
+    if (/\brename\b/i.test(request.prompt)) {
+      const renameTool = this.selectGitNexusToolByKind(allTools, "rename");
+      if (renameTool) {
+        selectedTools.push(renameTool);
+      }
+    }
+
+    const attachedTools = request.toolReferences
+      .map((ref) => allTools.find((tool) => tool.name === ref.name))
+      .filter((tool): tool is vscode.LanguageModelToolInformation =>
+        Boolean(tool),
+      );
+
+    return this.sortToolsByPriority(
+      this.dedupeTools([...selectedTools, ...attachedTools]),
+      request,
+    ).slice(0, 4);
   }
 
   private toChatTool(
@@ -760,28 +732,57 @@ export class GitNexusAgentParticipant {
 
   private selectToolsForRequest(
     request: vscode.ChatRequest,
-  ): readonly vscode.LanguageModelToolInformation[] {
+  ): vscode.LanguageModelToolInformation[] {
     const command = this.normalizeCommand(request);
+    const allowMutatingTools = this.requestAllowsMutatingTools(request);
     const validTools = vscode.lm.tools.filter((tool) =>
       this.isUsableTool(tool),
     );
 
-    if (
-      command === "explain" ||
-      command === "impact" ||
-      (command === "debug" && !this.promptLooksLikeEditRequest(request.prompt))
-    ) {
-      return validTools.filter((tool) => this.isReadOnlyTool(tool));
+    const attachedTools = request.toolReferences
+      .map((ref) => validTools.find((tool) => tool.name === ref.name))
+      .filter((tool): tool is vscode.LanguageModelToolInformation =>
+        Boolean(tool),
+      );
+    const gitNexusTools = validTools
+      .filter((tool) => this.isGitNexusTool(tool))
+      .filter(
+        (tool) => allowMutatingTools || this.isReadOnlyGitNexusTool(tool),
+      );
+    const selectedTools = [
+      ...gitNexusTools,
+      ...(allowMutatingTools
+        ? validTools.filter((tool) => this.isCodeBrainTool(tool))
+        : []),
+      ...(command === "plan"
+        ? validTools.filter((tool) => this.isPlanContextTool(tool))
+        : []),
+      ...attachedTools,
+    ];
+    const dedupedSelectedTools = this.dedupeTools(selectedTools);
+
+    if (dedupedSelectedTools.length > 0) {
+      return this.sortToolsByPriority(dedupedSelectedTools, request).slice(
+        0,
+        MAX_SELECTED_TOOLS,
+      );
     }
 
-    // /refactor and /debug should keep full capabilities including file edits.
-    return validTools;
+    const fallbackTools = validTools.filter((tool) =>
+      allowMutatingTools
+        ? this.isReadOnlyTool(tool) || this.isCodeBrainTool(tool)
+        : this.isReadOnlyTool(tool),
+    );
+    return this.sortToolsByPriority(fallbackTools, request).slice(
+      0,
+      MAX_SELECTED_TOOLS,
+    );
   }
 
   private buildHistoryPrompt(
     chatContext: vscode.ChatContext,
   ): string | undefined {
-    const turns = chatContext.history.slice(-6);
+    const turns = chatContext.history.slice(-MAX_CHAT_HISTORY_TURNS);
     if (turns.length === 0) {
       return undefined;
     }
@@ -806,7 +807,7 @@ export class GitNexusAgentParticipant {
           .join("")
           .trim();
         if (text) {
-          lines.push(`Assistant: ${text.slice(0, 2000)}`);
+          lines.push(`Assistant: ${text.slice(0, MAX_HISTORY_RESPONSE_CHARS)}`);
         }
       }
     }
@@ -857,6 +858,20 @@ export class GitNexusAgentParticipant {
       return {
         tools: [this.toChatTool(strictGitNexusTool)],
         toolMode: vscode.LanguageModelChatToolMode.Required,
+      };
+    }
+
+    if (this.isPostStrictWorkflowRound(request, round) || round > 0) {
+      const continuationTools = toTools(
+        this.selectContinuationTools(allTools, request),
+      );
+      return {
+        tools:
+          continuationTools.length > 0 ? continuationTools : undefined,
+        toolMode:
+          continuationTools.length > 0
+            ? vscode.LanguageModelChatToolMode.Auto
+            : undefined,
       };
     }
 
@@ -927,6 +942,178 @@ export class GitNexusAgentParticipant {
     }
   }
 
+  private shouldLogTokenEstimates(): boolean {
+    return vscode.workspace
+      .getConfiguration("codebrain.chat")
+      .get<boolean>("logTokenEstimates", true);
+  }
+
+  private serializePartForTokenEstimate(part: unknown): string {
+    if (part instanceof vscode.LanguageModelTextPart) {
+      return part.value;
+    }
+
+    if (part instanceof vscode.LanguageModelToolCallPart) {
+      return JSON.stringify({
+        toolCall: {
+          name: part.name,
+          input: part.input,
+        },
+      });
+    }
+
+    if (part instanceof vscode.LanguageModelToolResultPart) {
+      return JSON.stringify({
+        toolResult: part.content.map((contentPart) =>
+          this.serializePartForTokenEstimate(contentPart),
+        ),
+      });
+    }
+
+    try {
+      return JSON.stringify(part);
+    } catch {
+      return String(part);
+    }
+  }
+
+  private serializeMessageForTokenEstimate(
+    message: vscode.LanguageModelChatMessage,
+  ): string {
+    const role =
+      message.role === vscode.LanguageModelChatMessageRole.Assistant
+        ? "assistant"
+        : "user";
+    return [
+      role,
+      message.name ?? "",
+      ...message.content.map((part) => this.serializePartForTokenEstimate(part)),
+    ].join("\n");
+  }
+
+  private async countTokensForEstimate(
+    model: vscode.LanguageModelChat,
+    value: string | vscode.LanguageModelChatMessage,
+    token: vscode.CancellationToken,
+  ): Promise<number> {
+    if (token.isCancellationRequested) {
+      return 0;
+    }
+
+    try {
+      return await model.countTokens(value, token);
+    } catch {
+      const text =
+        typeof value === "string"
+          ? value
+          : this.serializeMessageForTokenEstimate(value);
+      return Math.ceil(text.length / TOKEN_ESTIMATE_FALLBACK_CHARS_PER_TOKEN);
+    }
+  }
+
+  private serializeToolsForTokenEstimate(
+    tools: vscode.LanguageModelChatTool[] | undefined,
+  ): string {
+    if (!tools || tools.length === 0) {
+      return "";
+    }
+
+    try {
+      return JSON.stringify(tools);
+    } catch {
+      return tools
+        .map(
+          (tool) =>
+            `${tool.name}\n${tool.description}\n${JSON.stringify(tool.inputSchema ?? {})}`,
+        )
+        .join("\n\n");
+    }
+  }
+
+  private async logInputTokenEstimate(
+    label: string,
+    model: vscode.LanguageModelChat,
+    messages: vscode.LanguageModelChatMessage[],
+    tools: vscode.LanguageModelChatTool[] | undefined,
+    token: vscode.CancellationToken,
+  ): Promise<InputTokenEstimate | undefined> {
+    if (!this.shouldLogTokenEstimates()) {
+      return undefined;
+    }
+
+    const toolText = this.serializeToolsForTokenEstimate(tools);
+    const [messageTokens, toolTokens] = await Promise.all([
+      Promise.all(
+        messages.map((message) =>
+          this.countTokensForEstimate(model, message, token),
+        ),
+      ).then((values) => values.reduce((sum, value) => sum + value, 0)),
+      toolText
+        ? this.countTokensForEstimate(model, toolText, token)
+        : Promise.resolve(0),
+    ]);
+    const toolCount = tools?.length ?? 0;
+    const estimate: InputTokenEstimate = {
+      total: messageTokens + toolTokens,
+      messageTokens,
+      toolTokens,
+      messageCount: messages.length,
+      toolCount,
+    };
+
+    getOutputChannel().appendLine(
+      [
+        `[CodeBrain Chat] Input token estimate (${label}):`,
+        `total=${estimate.total},`,
+        `messages=${estimate.messageTokens},`,
+        `tools=${estimate.toolTokens},`,
+        `messageCount=${estimate.messageCount},`,
+        `toolCount=${estimate.toolCount}`,
+      ].join(" "),
+    );
+
+    return estimate;
+  }
+
+  private async logOutputTokenEstimate(
+    label: string,
+    model: vscode.LanguageModelChat,
+    text: string,
+    toolCalls: vscode.LanguageModelToolCallPart[],
+    token: vscode.CancellationToken,
+    inputEstimate?: InputTokenEstimate,
+  ): Promise<void> {
+    if (!this.shouldLogTokenEstimates()) {
+      return;
+    }
+
+    const toolCallText = toolCalls
+      .map((toolCall) => this.serializePartForTokenEstimate(toolCall))
+      .join("\n");
+    const [textTokens, toolCallTokens] = await Promise.all([
+      text
+        ? this.countTokensForEstimate(model, text, token)
+        : Promise.resolve(0),
+      toolCallText
+        ? this.countTokensForEstimate(model, toolCallText, token)
+        : Promise.resolve(0),
+    ]);
+    const outputTotal = textTokens + toolCallTokens;
+    const inputTotal = inputEstimate?.total;
+
+    getOutputChannel().appendLine(
+      [
+        `[CodeBrain Chat] Output token estimate (${label}):`,
+        `total=${outputTotal},`,
+        `text=${textTokens},`,
+        `toolCalls=${toolCallTokens},`,
+        `toolCallCount=${toolCalls.length},`,
+        `inputTotal=${inputTotal ?? "unknown"},`,
+        `roundTotal=${inputTotal === undefined ? "unknown" : inputTotal + outputTotal}`,
+      ].join(" "),
+    );
+  }
+
   private async sendFinalAnswerRequest(
     messages: vscode.LanguageModelChatMessage[],
     request: vscode.ChatRequest,
@@ -948,6 +1135,13 @@ export class GitNexusAgentParticipant {
       ]),
     );
 
+    const inputEstimate = await this.logInputTokenEstimate(
+      "final-answer",
+      model,
+      messages,
+      undefined,
+      token,
+    );
     const response = await model.sendRequest(
       messages,
       {
@@ -962,6 +1156,14 @@ export class GitNexusAgentParticipant {
         text += part.value;
       }
     }
+    await this.logOutputTokenEstimate(
+      "final-answer",
+      model,
+      text,
+      [],
+      token,
+      inputEstimate,
+    );
 
     if (text.trim()) {
       stream.markdown(text);
@@ -995,6 +1197,13 @@ export class GitNexusAgentParticipant {
         request,
         round,
       );
+      const inputEstimate = await this.logInputTokenEstimate(
+        `tool-round-${round + 1}`,
+        model,
+        messages,
+        toolSelection.tools,
+        token,
+      );
       const response = await model.sendRequest(
         messages,
         {
@@ -1014,6 +1223,14 @@ export class GitNexusAgentParticipant {
           toolCalls.push(part);
         }
       }
+      await this.logOutputTokenEstimate(
+        `tool-round-${round + 1}`,
+        model,
+        textParts.map((part) => part.value).join(""),
+        toolCalls,
+        token,
+        inputEstimate,
+      );
 
       if (toolCalls.length === 0) {
         const text = textParts.map((part) => part.value).join("");
@@ -1263,11 +1480,7 @@ export class GitNexusAgentParticipant {
       }
 
       const command = this.normalizeCommand(request);
-      const instructionSections = await this.getInstructionSections();
-      const instructions = this.buildRelevantInstructions(
-        instructionSections,
-        request,
-      );
+      const instructions = this.buildRelevantInstructions(request);
       const defaultRepoScope = this.getDefaultRepoScope();
 
       // Resolve a concrete model; "auto" has no real endpoint and causes LM errors.
@@ -1299,46 +1512,7 @@ export class GitNexusAgentParticipant {
           "\n\nNo active GitNexus scope is set. Prefer discovering indexed repos/groups before using GitNexus tools that require a repo.";
       }
 
-      const tools = this.selectToolsForRequest(request)
-        .filter((tool) => {
-          const acceptableList = [
-            "vscode",
-            "copilot",
-            "search",
-            "skill",
-            "gitnexus",
-            "agent",
-          ];
-          return acceptableList.some(
-            (keyword) =>
-              tool.name.toLowerCase().includes(keyword) ||
-              tool.tags.join(" ").toLowerCase().includes(keyword),
-          );
-        })
-        .sort((left, right) => {
-          const leftIsGitNexus = this.isGitNexusTool(left) ? 1 : 0;
-          const rightIsGitNexus = this.isGitNexusTool(right) ? 1 : 0;
-          if (leftIsGitNexus !== rightIsGitNexus) {
-            return rightIsGitNexus - leftIsGitNexus;
-          }
-
-          const leftIsCodeBrain = left.name
-            .toLowerCase()
-            .startsWith("codebrain_")
-            ? 1
-            : 0;
-          const rightIsCodeBrain = right.name
-            .toLowerCase()
-            .startsWith("codebrain_")
-            ? 1
-            : 0;
-          if (leftIsCodeBrain !== rightIsCodeBrain) {
-            return rightIsCodeBrain - leftIsCodeBrain;
-          }
-
-          return left.name.localeCompare(right.name);
-        })
-        .slice(0, 128); // Limit to top 128 tools to avoid overwhelming the model
+      const tools = this.selectToolsForRequest(request);
 
       try {
         const chatResult = await this.sendModelRequest(
