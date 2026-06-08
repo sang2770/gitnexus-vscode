@@ -1,25 +1,28 @@
-﻿import * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import { execFileSync } from 'child_process';
-import * as crypto from 'crypto';
-import * as fs from 'fs';
 import * as path from 'path';
 import { ensureCodeBrainCli } from '../process/prerequisites.js';
-import { runCodeBrain, getOutputChannel, getWorkspaceRoot, buildCodeBrainTerminalCommand } from '../process/cli-runner.js';
-import { getActiveRepoPath } from '../process/group-context.js';
+import { getOutputChannel, getWorkspaceRoot, runCodeBrain } from '../process/cli-runner.js';
+import { getTokenOptimizationSettings } from '../process/token-optimizer.js';
+import { showQueryReport, type QueryResultItem } from '../ui/report-panel.js';
 
-export async function queryCommand(context?: vscode.ExtensionContext): Promise<void> {
+const MAX_CHANGED_FILES = 200;
+const MAX_REVIEW_SNIPPET_CHARS = 7000;
+const MAX_SELECTION_CHARS = 6000;
+const MAX_REVIEW_SUMMARY_LINES = 24;
+
+export async function queryCommand(): Promise<void> {
   const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
 
-  // Pre-fill with selected text if available
   const editor = vscode.window.activeTextEditor;
   const selected = editor?.document.getText(editor.selection).trim() ?? '';
 
   const query = await vscode.window.showInputBox({
     placeHolder: 'e.g. auth token validation flow',
-    prompt: 'CodeBrain: Search the knowledge graph',
+    prompt: 'CodeBrain: Search CodeGraph',
     value: selected,
   });
   if (!query) {
@@ -27,151 +30,70 @@ export async function queryCommand(context?: vscode.ExtensionContext): Promise<v
   }
 
   const channel = getOutputChannel();
-  channel.show(true);
-
-  const cwd = context ? (await getActiveRepoPath(context.globalState)) ?? getWorkspaceRoot() : getWorkspaceRoot();
 
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Querying...', cancellable: false },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'CodeBrain: Querying CodeGraph...',
+      cancellable: false,
+    },
     async () => {
-      await runCodeBrain(['query', query, '--limit', '5'], { cwd });
-    },
-  );
-}
+      const workspaceRoot = getWorkspaceRoot();
+      const tokenSettings = getTokenOptimizationSettings('balanced');
+      const statusResult = await runCodeBrain(['status', workspaceRoot, '--json'], {
+        cwd: workspaceRoot,
+        stream: false,
+      });
+      const result = await runCodeBrain(
+        ['query', query, '--path', workspaceRoot, '--limit', '20', '--json'],
+        { cwd: workspaceRoot, stream: false },
+      );
+      const filesScanned = parseStatusFileCount(statusResult.stdout);
 
-export async function jiraPlanAndQueryCommand(context?: vscode.ExtensionContext): Promise<void> {
-  const issueKey = await vscode.window.showInputBox({
-    title: 'CodeBrain Jira Plan',
-    prompt: 'Enter Jira issue key to build a plan from Atlassian MCP + GitNexus MCP',
-    placeHolder: 'PROJ-123',
-    validateInput: (value) => {
-      const normalized = value.trim().toUpperCase();
-      return /^[A-Z][A-Z0-9_]+-\d+$/.test(normalized)
-        ? undefined
-        : 'Issue key must look like PROJ-123.';
-    },
-  });
-  if (!issueKey) {
-    return;
-  }
+      channel.appendLine(result.stdout.trim());
+      if (result.stderr.trim()) {
+        channel.appendLine(result.stderr.trim());
+      }
 
-  const collaborationGoal = await vscode.window.showInputBox({
-    title: 'CodeBrain Jira Plan',
-    prompt: 'Optional: add collaboration context (incident, release scope, squad goal)',
-    placeHolder: 'Checkout timeout spikes during deploy window',
-    value: '',
-  });
+      if (result.exitCode !== 0) {
+        vscode.window.showErrorMessage('CodeBrain: Query failed. Check Output panel.');
+        return;
+      }
 
-  const workspaceRoot = context
-    ? (await getActiveRepoPath(context.globalState)) ?? getWorkspaceRoot()
-    : getWorkspaceRoot();
-
-  const planPrompt = [
-    'Slash command mode: /plan.',
-    `Jira issue key: ${issueKey.trim().toUpperCase()}.`,
-    collaborationGoal?.trim()
-      ? `Collaboration context: ${collaborationGoal.trim()}.`
-      : 'Collaboration context: none provided.',
-    `Workspace scope: ${workspaceRoot}.`,
-    '',
-    'Workflow to execute with MCP tools:',
-    '1) Atlassian MCP: read Jira issue details, comments, links, assignee, priority, sprint context.',
-    '2) Build Analysis Brief: objective, hypotheses, unknowns, and query keywords.',
-    '3) GitNexus MCP: list_repos, query, context, impact, detect_changes (if local changes exist).',
-    '4) Output Execution Plan: scope, tasks, test plan, risk matrix, and Go/No-Go decision.',
-    '',
-    'Respond with sections: Analysis Brief, GitNexus Findings, Execution Plan, Decision, Jira Comment Draft.',
-  ].join('\n');
-
-  const encodedPrompt = encodeURIComponent(planPrompt);
-  const chatUri = vscode.Uri.parse(`vscode://xpl.chat-uri/startChat?agent=codebrain.gitnexus&prompt=${encodedPrompt}`);
-  await vscode.commands.executeCommand('vscode.open', chatUri);
-}
-
-export async function wikiCommand(): Promise<void> {
-  const ok = await ensureCodeBrainCli();
-  if (!ok) {
-    return;
-  }
-
-  const channel = getOutputChannel();
-  channel.show(true);
-
-  const model = await vscode.window.showInputBox({
-    placeHolder: 'gpt-4o-mini',
-    prompt: 'CodeBrain Wiki: LLM model to use (leave blank for default)',
-    value: '',
-  });
-
-  const args = ['wiki'];
-  if (model) {
-    args.push('--model', model);
-  }
-
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Generating wiki...', cancellable: true },
-    async (_progress, token) => {
-      const result = await runCodeBrain(args, { cwd: getWorkspaceRoot(), token });
-      if (result.exitCode === 0) {
-        vscode.window.showInformationMessage('CodeBrain: Wiki generated successfully.');
-      } else if (!token.isCancellationRequested) {
-        vscode.window.showErrorMessage('CodeBrain: Wiki generation failed. Check Output panel.');
+      try {
+        const parsed = JSON.parse(result.stdout) as QueryResultItem[];
+        const optimized = tokenSettings.enabled
+          ? parsed.slice(0, tokenSettings.queryResultLimit)
+          : parsed;
+        showQueryReport(query, optimized, result.stdout, {
+          allResultCount: parsed.length,
+          filesScanned,
+        });
+        vscode.window.showInformationMessage(`CodeBrain: Showing ${optimized.length} of ${parsed.length} result${parsed.length === 1 ? '' : 's'} (${tokenSettings.configuredMode} token mode).`);
+      } catch {
+        showQueryReport(query, [], result.stdout || result.stderr);
+        vscode.window.showWarningMessage('CodeBrain: Query returned non-JSON output. Showing raw output.');
       }
     },
   );
 }
 
-let _serveTerminal: vscode.Terminal | undefined;
-
-export async function serveCommand(): Promise<void> {
-  const ok = await ensureCodeBrainCli();
-  if (!ok) {
-    return;
+function parseStatusFileCount(stdout: string): number | undefined {
+  try {
+    const parsed = JSON.parse(stdout) as { fileCount?: number };
+    return parsed.fileCount;
+  } catch {
+    return undefined;
   }
-
-  if (_serveTerminal && !_serveTerminal.exitStatus) {
-    const choice = await vscode.window.showWarningMessage(
-      'CodeBrain: Bridge server is already running.',
-      'Show Terminal',
-      'Restart',
-    );
-    if (choice === 'Show Terminal') {
-      _serveTerminal.show();
-      return;
-    }
-    _serveTerminal.dispose();
-  }
-
-  _serveTerminal = vscode.window.createTerminal({
-    name: 'CodeBrain Bridge',
-    cwd: getWorkspaceRoot(),
-    shellPath: process.platform === 'win32' ? 'cmd.exe' : undefined,
-  });
-  _serveTerminal.show();
-  _serveTerminal.sendText(buildCodeBrainTerminalCommand(['serve']));
-
-  vscode.window.showInformationMessage(
-    'CodeBrain: Bridge server starting on http://127.0.0.1:4747',
-    'Open Web UI',
-  ).then((c) => {
-    if (c === 'Open Web UI') {
-      vscode.env.openExternal(vscode.Uri.parse('http://127.0.0.1:4747'));
-    }
-  });
 }
 
-export async function prReviewCommand(context?: vscode.ExtensionContext): Promise<void> {
+export async function prReviewCommand(): Promise<void> {
   const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
 
-  const channel = getOutputChannel();
-  channel.show(true);
-  const workspaceRoot = context
-    ? (await getActiveRepoPath(context.globalState)) ?? getWorkspaceRoot()
-    : getWorkspaceRoot();
-
+  const workspaceRoot = getWorkspaceRoot();
   const reviewMode = await pickPrReviewMode(workspaceRoot);
   if (!reviewMode) {
     return;
@@ -183,333 +105,86 @@ export async function prReviewCommand(context?: vscode.ExtensionContext): Promis
     return;
   }
 
+  const channel = getOutputChannel();
+  channel.show(true);
+
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Preparing PR review context...', cancellable: true },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'CodeBrain: Preparing code review context...',
+      cancellable: true,
+    },
     async (_progress, token) => {
-      if (token.isCancellationRequested) {
-        return;
-      }
-
-      // Health hint: show current index status in output panel (best-effort only).
-      await runCodeBrain(['status'], { cwd: workspaceRoot, stream: true });
-
-      const detectArgs = ['detect-changes', '--scope', reviewMode.scope, '--repo', workspaceRoot];
-      if (reviewMode.baseRef) {
-        detectArgs.push('--base-ref', reviewMode.baseRef);
-      }
-
-      const detectResult = await runCodeBrain(detectArgs, {
+      const statusResult = await runCodeBrain(['status', workspaceRoot, '--json'], {
         cwd: workspaceRoot,
-        stream: true,
+        stream: false,
         token,
       });
 
-      const changedSection = changedFiles.map((f) => `- ${f}`).join('\n');
-      const detectSummary = buildDetectChangesSummary(detectResult.stdout, detectResult.stderr);
-      const scopeSummary =
-        reviewMode.scope === 'compare'
-          ? `compare against ${reviewMode.baseRef ?? 'main'}`
-          : reviewMode.scope;
+      const affectedResult = await runCodeBrain(
+        ['affected', ...changedFiles, '--path', workspaceRoot, '--json'],
+        { cwd: workspaceRoot, stream: false, token },
+      );
 
-      // Open Copilot chat with the reviewer agent and prefilled context
-      const prompt =
-        'Run a PR review using CodeBrain MCP tools.\n' +
-        'Workflow: 1) inspect changed files, 2) run detect_changes for the selected scope, 3) run impact on modified symbols, 4) run context on key symbols, 5) report findings by severity, 6) add missing tests.\n\n' +
-        `Review scope: ${scopeSummary}\n` +
-        `Changed files (${changedFiles.length}):\n${changedSection}\n\n` +
-        `Detect-changes preflight:\n${detectSummary}\n\n` +
-        'Review focus: highlight callers outside the diff, missing tests, and risky process / route impacts.';
+      if (token.isCancellationRequested) {
+        vscode.window.showWarningMessage('CodeBrain: Code review preparation cancelled.');
+        return;
+      }
+
+      const prompt = buildReviewPrompt({
+        mode: reviewMode,
+        changedFiles,
+        statusSummary: formatStatusSummary(statusResult.stdout, statusResult.stderr),
+        affectedSummary: formatAffectedSummary(affectedResult.stdout, affectedResult.stderr),
+        diffPreview: buildReviewSnippet(workspaceRoot, reviewMode),
+      });
 
       const encodedPrompt = encodeURIComponent(prompt);
-      // VS Code Copilot chat URI â€” opens chat with prefilled prompt
-      const chatUri = vscode.Uri.parse(`vscode://xpl.chat-uri/startChat?agent=gitnexus-pr-review&prompt=${encodedPrompt}`);
+      const chatUri = vscode.Uri.parse(
+        `vscode://xpl.chat-uri/startChat?agent=codebrain.codegraph&prompt=${encodedPrompt}`,
+      );
       await vscode.commands.executeCommand('vscode.open', chatUri);
     },
   );
 }
 
-let _dashboardPanel: vscode.WebviewPanel | undefined;
-type DashboardMessage =
-  | { type: 'openExternal'; payload: { url: string } }
-  | { type: 'startBridgeServer' };
-
-export async function openDashboardCommand(context: vscode.ExtensionContext): Promise<void> {
-  const ok = await ensureCodeBrainCli();
-  if (!ok) {
-    return;
-  }
-
-  ensureBridgeServerRunning();
-
-  if (_dashboardPanel) {
-    _dashboardPanel.reveal(vscode.ViewColumn.Beside);
-    return;
-  }
-
-  const distDir = resolveGitnexusWebDist(context.extensionUri.fsPath);
-  const localResourceRoots = [context.extensionUri];
-  if (distDir) {
-    localResourceRoots.push(vscode.Uri.file(distDir));
-  }
-
-  const panel = vscode.window.createWebviewPanel(
-    'gitnexus.dashboard',
-    'CodeBrain Graph Dashboard',
-    vscode.ViewColumn.Beside,
-    {
-      enableScripts: true,
-      retainContextWhenHidden: true,
-      localResourceRoots,
-    },
-  );
-
-  _dashboardPanel = panel;
-  panel.onDidDispose(() => {
-    _dashboardPanel = undefined;
-  });
-
-  panel.webview.onDidReceiveMessage((msg: DashboardMessage) => {
-    if (!msg || typeof msg !== 'object') {
-      return;
-    }
-
-    if (msg.type === 'openExternal' && msg.payload?.url) {
-      void vscode.env.openExternal(vscode.Uri.parse(msg.payload.url));
-      return;
-    }
-
-    if (msg.type === 'startBridgeServer') {
-      void vscode.commands.executeCommand('codebrain.serve');
-    }
-  });
-
-  panel.webview.html = distDir
-    ? getGitnexusWebHtml(panel.webview, distDir)
-    : getFallbackDashboardHtml(panel.webview, crypto.randomBytes(16).toString('hex'));
-}
-
-function getGitnexusWebHtml(webview: vscode.Webview, distDir: string): string {
-  const indexPath = path.join(distDir, 'index.html');
-  if (!fs.existsSync(indexPath)) {
-    return getFallbackDashboardHtml(webview, crypto.randomBytes(16).toString('hex'));
-  }
-
-  const distUri = webview.asWebviewUri(vscode.Uri.file(distDir)).toString();
-  const nonce = crypto.randomBytes(16).toString('hex');
-  const csp = [
-    "default-src 'none'",
-    `img-src ${webview.cspSource} https: data: blob:`,
-    `font-src ${webview.cspSource} https:`,
-    `style-src ${webview.cspSource} 'unsafe-inline' https:`,
-    `script-src ${webview.cspSource} 'nonce-${nonce}'`,
-    `connect-src ${webview.cspSource} https: http://localhost:4747 http://127.0.0.1:4747 ws://localhost:4747 ws://127.0.0.1:4747`,
-    `worker-src ${webview.cspSource} blob:`,
-  ].join('; ');
-
-  let html = fs.readFileSync(indexPath, 'utf8');
-  // Rewrite absolute asset paths to webview URIs
-  html = html.replace(/(src|href)=["']\/(.*?)["']/g, (_m, attr: string, assetPath: string) => {
-    return `${attr}="${distUri}/${assetPath}"`;
-  });
-  // Remove crossorigin attributes â€” webview resource URIs don't serve CORS headers,
-  // so crossorigin causes module scripts and stylesheets to fail to load.
-  html = html.replace(/\s+crossorigin(?:=["'][^"']*["'])?/gi, '');
-  // Attach nonce to all script tags so module bootstrap can run under CSP.
-  html = html.replace(/<script(\s|>)/gi, `<script nonce="${nonce}"$1`);
-
-  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}" />`;
-  if (html.includes('http-equiv="Content-Security-Policy"')) {
-    html = html.replace(/<meta\s+http-equiv=["']Content-Security-Policy["'][^>]*>/i, cspMeta);
-  } else {
-    html = html.replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n    ${cspMeta}`);
-  }
-
-  return html;
-}
-
-function getFallbackDashboardHtml(webview: vscode.Webview, nonce: string): string {
-  const dashboardUrl = 'http://127.0.0.1:4747';
-  const csp = [
-    "default-src 'none'",
-    `style-src ${webview.cspSource} 'nonce-${nonce}'`,
-    `script-src ${webview.cspSource} 'nonce-${nonce}'`,
-    `img-src ${webview.cspSource} https: data:`,
-    `frame-src ${dashboardUrl}`,
-    `connect-src ${dashboardUrl} ws://127.0.0.1:4747 ws://localhost:4747`,
-  ].join('; ');
-
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="${csp}" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CodeBrain Dashboard Setup</title>
-    <style nonce="${nonce}">
-      :root { color-scheme: light dark; }
-      body {
-        margin: 0;
-        font-family: var(--vscode-font-family);
-        color: var(--vscode-foreground);
-        background: var(--vscode-editor-background);
-      }
-      .header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--vscode-panel-border);
-      }
-      .title { font-weight: 600; }
-      .container {
-        max-width: 780px;
-        margin: 16px auto;
-        border: 1px solid var(--vscode-panel-border);
-        border-radius: 8px;
-        padding: 16px;
-      }
-      .hint {
-        color: var(--vscode-descriptionForeground);
-        line-height: 1.5;
-        margin-bottom: 12px;
-      }
-      .cmd {
-        margin: 8px 0 14px 0;
-        padding: 8px;
-        border: 1px solid var(--vscode-panel-border);
-        border-radius: 6px;
-        background: var(--vscode-editorWidget-background);
-        font-family: var(--vscode-editor-font-family);
-        white-space: pre-wrap;
-      }
-      button {
-        padding: 6px 12px;
-        border-radius: 6px;
-        border: 1px solid var(--vscode-button-border, transparent);
-        background: var(--vscode-button-background);
-        color: var(--vscode-button-foreground);
-        cursor: pointer;
-      }
-      button.secondary {
-        background: var(--vscode-editorWidget-background);
-        color: var(--vscode-editorWidget-foreground);
-      }
-      #dashboard {
-        width: 100%;
-        height: calc(100vh - 48px);
-        border: 0;
-      }
-      .hidden { display: none; }
-    </style>
-  </head>
-  <body>
-    <div class="header">
-      <span class="title">CodeBrain Graph Dashboard</span>
-      <button id="refresh" type="button">Refresh</button>
-      <button id="openExternal" class="secondary" type="button">Open in Browser</button>
-    </div>
-
-    <div id="fallback" class="container">
-      <h2>CodeBrain Dashboard assets are unavailable</h2>
-      <div class="hint">
-        The embedded dashboard build was not found in this extension package.
-      </div>
-      <div class="hint">Rebuild and package extension, then reopen dashboard:</div>
-      <div class="cmd">npm run build:web && npm run package</div>
-      <button id="startBridge" type="button">Start Bridge Server</button>
-    </div>
-
-    <iframe id="dashboard" src="${dashboardUrl}" title="CodeBrain Graph Dashboard" class="hidden"></iframe>
-
-    <script nonce="${nonce}">
-      const vscode = acquireVsCodeApi();
-      const dashboardUrl = ${JSON.stringify(dashboardUrl)};
-      const dashboard = document.getElementById('dashboard');
-      const fallback = document.getElementById('fallback');
-      const refreshButton = document.getElementById('refresh');
-      const openExternalButton = document.getElementById('openExternal');
-      const startBridgeButton = document.getElementById('startBridge');
-
-      function loadDashboard() {
-        dashboard.src = dashboardUrl;
-        dashboard.classList.remove('hidden');
-      }
-
-      refreshButton.addEventListener('click', () => {
-        loadDashboard();
-      });
-
-      openExternalButton.addEventListener('click', () => {
-        vscode.postMessage({ type: 'openExternal', payload: { url: dashboardUrl } });
-      });
-
-      startBridgeButton.addEventListener('click', () => {
-        vscode.postMessage({ type: 'startBridgeServer' });
-      });
-
-      // Attempt to render dashboard immediately; keep fallback available for manual recovery.
-      loadDashboard();
-    </script>
-  </body>
-</html>`;
-}
-
-function resolveGitnexusWebDist(extensionRoot: string): string | undefined {
-  const candidates = [
-    path.join(extensionRoot, 'runtime', 'web', 'dist'),
-    path.join(extensionRoot, 'GitNexus', 'gitnexus-web', 'dist'),
-  ];
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(path.join(candidate, 'index.html'))) {
-      return candidate;
-    }
-  }
-
-  return undefined;
-}
-
-function ensureBridgeServerRunning(): void {
-  if (_serveTerminal && !_serveTerminal.exitStatus) {
-    return;
-  }
-
-  _serveTerminal = vscode.window.createTerminal({
-    name: 'GitNexus Bridge',
-    cwd: getWorkspaceRoot(),
-    shellPath: process.platform === 'win32' ? 'cmd.exe' : undefined,
-  });
-  _serveTerminal.sendText(buildCodeBrainTerminalCommand(['serve']));
-}
-
-function getStagedFiles(cwd: string): string[] {
-  try {
-    const out = execFileSync('git', ['diff', '--name-only', '--cached'], {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return out
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
-      .slice(0, 200);
-  } catch {
-    return [];
-  }
-}
-
-type PrReviewScope = 'staged' | 'all' | 'compare';
+type PrReviewScope = 'selection' | 'current-file' | 'staged' | 'all' | 'compare';
 
 interface PrReviewMode {
   scope: PrReviewScope;
   baseRef?: string;
+  filePath?: string;
+  selectionText?: string;
 }
 
 async function pickPrReviewMode(cwd: string): Promise<PrReviewMode | undefined> {
   const defaultBaseRef = getDefaultBaseRef(cwd);
-  const items: Array<vscode.QuickPickItem & { mode: PrReviewMode }> = [
+  const activeEditor = getActiveEditorReviewContext(cwd);
+  const items: Array<vscode.QuickPickItem & { mode: PrReviewMode }> = [];
+
+  if (activeEditor?.selectionText) {
+    items.push({
+      label: 'Review selected code',
+      description: activeEditor.relativeFilePath,
+      detail: 'Review the selected code and ask CodeGraph to inspect callers, callees, and nearby impact.',
+      mode: {
+        scope: 'selection',
+        filePath: activeEditor.relativeFilePath,
+        selectionText: activeEditor.selectionText,
+      },
+    });
+  }
+
+  if (activeEditor) {
+    items.push({
+      label: 'Review current file',
+      description: activeEditor.relativeFilePath,
+      detail: 'Review this file, using CodeGraph for structural context and affected-test preflight.',
+      mode: { scope: 'current-file', filePath: activeEditor.relativeFilePath },
+    });
+  }
+
+  items.push(
     {
       label: 'Review staged changes',
       description: 'Use git diff --cached',
@@ -525,11 +200,11 @@ async function pickPrReviewMode(cwd: string): Promise<PrReviewMode | undefined> 
       description: `Compare current branch against ${defaultBaseRef}`,
       mode: { scope: 'compare', baseRef: defaultBaseRef },
     },
-  ];
+  );
 
   const picked = await vscode.window.showQuickPick(items, {
-    title: 'CodeBrain PR Review',
-    placeHolder: 'Choose which changes to review',
+    title: 'Review Code with CodeBrain',
+    placeHolder: 'Choose what CodeBrain should review',
   });
   if (!picked) {
     return undefined;
@@ -540,7 +215,7 @@ async function pickPrReviewMode(cwd: string): Promise<PrReviewMode | undefined> 
   }
 
   const baseRef = await vscode.window.showInputBox({
-    title: 'CodeBrain PR Review',
+    title: 'Review Code with CodeBrain',
     prompt: 'Base branch or ref for compare review',
     placeHolder: 'main',
     value: picked.mode.baseRef ?? defaultBaseRef,
@@ -556,10 +231,16 @@ async function pickPrReviewMode(cwd: string): Promise<PrReviewMode | undefined> 
 
 function getChangedFilesForReview(cwd: string, mode: PrReviewMode): string[] {
   switch (mode.scope) {
+    case 'selection':
+    case 'current-file':
+      return mode.filePath ? [mode.filePath] : [];
     case 'staged':
       return getGitDiffFiles(cwd, ['diff', '--name-only', '--cached']);
     case 'all':
-      return getGitDiffFiles(cwd, ['diff', '--name-only', 'HEAD']);
+      return unique([
+        ...getGitDiffFiles(cwd, ['diff', '--name-only', 'HEAD']),
+        ...getGitDiffFiles(cwd, ['ls-files', '--others', '--exclude-standard']),
+      ]);
     case 'compare':
       return getGitDiffFiles(cwd, ['diff', '--name-only', `${mode.baseRef ?? 'main'}...HEAD`]);
     default:
@@ -577,18 +258,259 @@ function getGitDiffFiles(cwd: string, args: string[]): string[] {
     });
 
     return out
-      .split('\n')
+      .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line.length > 0)
-      .slice(0, 200);
+      .slice(0, MAX_CHANGED_FILES);
   } catch {
     return [];
   }
 }
 
+interface ActiveEditorReviewContext {
+  relativeFilePath: string;
+  selectionText?: string;
+}
+
+interface ReviewPromptContext {
+  mode: PrReviewMode;
+  changedFiles: string[];
+  statusSummary: string;
+  affectedSummary: string;
+  diffPreview: string;
+}
+
+interface StatusJson {
+  initialized?: boolean;
+  fileCount?: number;
+  nodeCount?: number;
+  edgeCount?: number;
+  pendingChanges?: {
+    added?: number;
+    modified?: number;
+    removed?: number;
+  };
+}
+
+interface AffectedJson {
+  affectedTests?: string[];
+  totalDependentsTraversed?: number;
+}
+
+function getActiveEditorReviewContext(cwd: string): ActiveEditorReviewContext | undefined {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.uri.scheme !== 'file') {
+    return undefined;
+  }
+
+  const relativeFilePath = toWorkspaceRelativePath(cwd, editor.document.uri.fsPath);
+  if (!relativeFilePath) {
+    return undefined;
+  }
+
+  const selectionText = editor.document.getText(editor.selection).trim();
+  return {
+    relativeFilePath,
+    selectionText: selectionText ? truncateText(selectionText, MAX_SELECTION_CHARS) : undefined,
+  };
+}
+
+function toWorkspaceRelativePath(cwd: string, filePath: string): string | undefined {
+  const relative = path.relative(cwd, filePath);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return undefined;
+  }
+  return relative.replace(/\\/g, '/');
+}
+
+function buildReviewPrompt(ctx: ReviewPromptContext): string {
+  const scopeSummary = formatScopeSummary(ctx.mode);
+  const changedSection = ctx.changedFiles.map((file) => `- ${file}`).join('\n');
+
+  return [
+    'Run a code review using CodeBrain and CodeGraph MCP tools.',
+    '',
+    'Review rules:',
+    '- Lead with findings ordered by severity. If there are no issues, say so clearly.',
+    '- Focus on correctness, behavioral regressions, missing caller updates, missing tests, and stale-index risk.',
+    '- Use codegraph_explore/search to understand touched areas and codegraph_impact for non-trivial changed symbols.',
+    '- Treat direct callers/dependents outside the reviewed file list as high-signal review targets.',
+    '- Keep summaries brief; do not produce a marketing-style overview.',
+    '',
+    `Review scope: ${scopeSummary}`,
+    `Changed/reviewed files (${ctx.changedFiles.length}):`,
+    changedSection || '- None',
+    '',
+    `CodeGraph status preflight:\n${ctx.statusSummary}`,
+    '',
+    `Affected tests preflight:\n${ctx.affectedSummary}`,
+    '',
+    ctx.diffPreview,
+    '',
+    'Expected output:',
+    '1. Findings first, each with severity and file/line evidence.',
+    '2. Open questions or assumptions.',
+    '3. Short test coverage note.',
+  ].join('\n');
+}
+
+function formatScopeSummary(mode: PrReviewMode): string {
+  switch (mode.scope) {
+    case 'selection':
+      return `selected code in ${mode.filePath ?? 'active editor'}`;
+    case 'current-file':
+      return `current file ${mode.filePath ?? 'active editor'}`;
+    case 'staged':
+      return 'staged changes';
+    case 'all':
+      return 'working tree changes, including untracked files';
+    case 'compare':
+      return `compare against ${mode.baseRef ?? 'main'}`;
+    default:
+      return mode.scope;
+  }
+}
+
+function buildReviewSnippet(cwd: string, mode: PrReviewMode): string {
+  if (mode.scope === 'selection') {
+    return [
+      `Selected code from ${mode.filePath ?? 'active editor'}:`,
+      '```',
+      escapeCodeFence(mode.selectionText ?? ''),
+      '```',
+    ].join('\n');
+  }
+
+  if (mode.scope === 'current-file') {
+    const editor = vscode.window.activeTextEditor;
+    const currentText = editor?.document.getText() ?? '';
+    const diff = mode.filePath
+      ? getGitOutput(cwd, ['diff', '--unified=3', 'HEAD', '--', mode.filePath])
+      : '';
+
+    if (diff.trim()) {
+      return formatSnippet('Current file diff preview', diff);
+    }
+
+    return formatSnippet(
+      `Current file snapshot: ${mode.filePath ?? 'active editor'}`,
+      currentText || 'No current editor content captured.',
+    );
+  }
+
+  const stat = getGitDiffStat(cwd, mode);
+  const patch = getGitDiffPatch(cwd, mode);
+  const parts = [
+    stat ? formatSnippet('Diff stat', stat, 2000) : undefined,
+    patch ? formatSnippet('Diff preview', patch) : 'Diff preview: no tracked-file patch captured.',
+  ].filter(Boolean);
+
+  return parts.join('\n\n');
+}
+
+function getGitDiffStat(cwd: string, mode: PrReviewMode): string {
+  return getGitOutput(cwd, buildGitDiffArgs(mode, '--stat'));
+}
+
+function getGitDiffPatch(cwd: string, mode: PrReviewMode): string {
+  return getGitOutput(cwd, buildGitDiffArgs(mode, '--unified=3'));
+}
+
+function buildGitDiffArgs(mode: PrReviewMode, formatArg: string): string[] {
+  switch (mode.scope) {
+    case 'staged':
+      return ['diff', '--cached', formatArg];
+    case 'compare':
+      return ['diff', formatArg, `${mode.baseRef ?? 'main'}...HEAD`];
+    case 'all':
+    default:
+      return ['diff', formatArg, 'HEAD'];
+  }
+}
+
+function getGitOutput(cwd: string, args: string[]): string {
+  try {
+    return execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 10000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return '';
+  }
+}
+
+function formatStatusSummary(stdout: string, stderr: string): string {
+  try {
+    const parsed = JSON.parse(stdout) as StatusJson;
+    if (!parsed.initialized) {
+      return '- CodeGraph index is not initialized.';
+    }
+
+    const pending =
+      (parsed.pendingChanges?.added ?? 0) +
+      (parsed.pendingChanges?.modified ?? 0) +
+      (parsed.pendingChanges?.removed ?? 0);
+    const freshness = pending > 0 ? `stale (${pending} pending changes)` : 'fresh';
+    const stats = [
+      parsed.fileCount !== undefined ? `${parsed.fileCount} files` : undefined,
+      parsed.nodeCount !== undefined ? `${parsed.nodeCount} nodes` : undefined,
+      parsed.edgeCount !== undefined ? `${parsed.edgeCount} edges` : undefined,
+    ].filter(Boolean).join(', ');
+
+    return `- Index: ${freshness}${stats ? ` (${stats})` : ''}.`;
+  } catch {
+    return buildToolSummary(stdout, stderr, '- Status preflight returned no readable output.');
+  }
+}
+
+function formatAffectedSummary(stdout: string, stderr: string): string {
+  try {
+    const parsed = JSON.parse(stdout) as AffectedJson;
+    const tests = parsed.affectedTests ?? [];
+    const dependents = parsed.totalDependentsTraversed ?? 0;
+    if (tests.length === 0) {
+      return `- No affected tests detected. ${dependents} dependents traversed.`;
+    }
+
+    const listed = tests
+      .slice(0, MAX_REVIEW_SUMMARY_LINES)
+      .map((file) => `- ${file}`)
+      .join('\n');
+    const extra = tests.length > MAX_REVIEW_SUMMARY_LINES
+      ? `\n- ...and ${tests.length - MAX_REVIEW_SUMMARY_LINES} more.`
+      : '';
+
+    return `${listed}${extra}\n- ${dependents} dependents traversed.`;
+  } catch {
+    return buildToolSummary(stdout, stderr, '- Affected-test preflight returned no readable output.');
+  }
+}
+
+function formatSnippet(title: string, text: string, limit = MAX_REVIEW_SNIPPET_CHARS): string {
+  return [
+    `${title}${text.length > limit ? ` (truncated to ${limit} chars)` : ''}:`,
+    '```',
+    escapeCodeFence(truncateText(text, limit)),
+    '```',
+  ].join('\n');
+}
+
+function truncateText(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}\n...[truncated]`;
+}
+
+function escapeCodeFence(text: string): string {
+  return text.replace(/```/g, '`` `');
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values)).slice(0, MAX_CHANGED_FILES);
+}
+
 function getDefaultBaseRef(cwd: string): string {
-  const candidates = ['main', 'master'];
-  for (const candidate of candidates) {
+  for (const candidate of ['main', 'master']) {
     if (gitRefExists(cwd, candidate)) {
       return candidate;
     }
@@ -610,17 +532,17 @@ function gitRefExists(cwd: string, ref: string): boolean {
   }
 }
 
-function buildDetectChangesSummary(stdout: string, stderr: string): string {
+function buildToolSummary(stdout: string, stderr: string, emptyMessage: string): string {
   const text = `${stdout}\n${stderr}`.trim();
   if (text.length === 0) {
-    return '- No detect-changes output captured. Run the tool again in chat if needed.';
+    return emptyMessage;
   }
 
-  const lines = text
+  return text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
-    .slice(0, 20);
-
-  return lines.map((line) => `- ${line}`).join('\n');
+    .slice(0, 20)
+    .map((line) => `- ${line}`)
+    .join('\n');
 }

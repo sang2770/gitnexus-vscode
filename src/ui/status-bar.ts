@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { getActiveContext, type ContextType } from '../process/group-context.js';
 
 export type IndexState = 'unknown' | 'indexing' | 'fresh' | 'stale' | 'not-indexed' | 'error';
 
@@ -12,54 +11,49 @@ interface StatusBarConfig {
 }
 
 export interface IndexTooltipDetails {
-  repository?: string;
-  indexed?: string;
-  indexedCommit?: string;
-  currentCommit?: string;
-  status?: string;
-  groupName?: string;
-  lastSync?: string;
-  groupRepos?: GroupRepoStatus[];
-}
-
-export interface GroupRepoStatus {
-  path: string;
-  indexStatus: 'ok' | 'stale' | 'missing';
-  commitsBehind?: number;
-  contractsStale?: boolean;
+  projectPath?: string;
+  fileCount?: number;
+  nodeCount?: number;
+  edgeCount?: number;
+  lastIndexed?: string | null;
+  pendingChanges?: {
+    added: number;
+    modified: number;
+    removed: number;
+  };
 }
 
 const STATE_CONFIG: Record<IndexState, StatusBarConfig> = {
   unknown: {
     text: '$(graph-line) CodeBrain',
-    tooltip: 'CodeBrain: checking status…',
+    tooltip: 'CodeBrain: checking CodeGraph status...',
     command: 'codebrain.status',
   },
   indexing: {
-    text: '$(sync~spin) CodeBrain: Indexing…',
-    tooltip: 'CodeBrain: Indexing in progress',
+    text: '$(sync~spin) CodeBrain: Indexing...',
+    tooltip: 'CodeBrain: CodeGraph indexing in progress',
     command: 'codebrain.status',
   },
   fresh: {
     text: '$(graph-line) CodeBrain: Fresh',
-    tooltip: 'CodeBrain: Index is up to date. Click to view status.',
+    tooltip: 'CodeBrain: CodeGraph index is up to date. Click to view status.',
     command: 'codebrain.status',
   },
   stale: {
     text: '$(warning) CodeBrain: Stale',
-    tooltip: 'CodeBrain: Index is behind HEAD. Click to re-index.',
+    tooltip: 'CodeBrain: CodeGraph index has pending changes. Click to sync.',
     backgroundColor: new vscode.ThemeColor('statusBarItem.warningBackground'),
     command: 'codebrain.analyze',
   },
   'not-indexed': {
     text: '$(circle-slash) CodeBrain: Not indexed',
-    tooltip: 'CodeBrain: This repo has not been indexed yet. Click to set up and analyze.',
+    tooltip: 'CodeBrain: This workspace has no CodeGraph index. Click to set up and index.',
     backgroundColor: new vscode.ThemeColor('statusBarItem.errorBackground'),
     command: 'codebrain.setupAndAnalyze',
   },
   error: {
     text: '$(error) CodeBrain: Error',
-    tooltip: 'CodeBrain: Failed to read index status. Check Output panel.',
+    tooltip: 'CodeBrain: Failed to read CodeGraph status. Check Output panel.',
     backgroundColor: new vscode.ThemeColor('statusBarItem.errorBackground'),
     command: 'codebrain.status',
   },
@@ -67,11 +61,8 @@ const STATE_CONFIG: Record<IndexState, StatusBarConfig> = {
 
 export class CodeBrainStatusBar implements vscode.Disposable {
   private readonly _item: vscode.StatusBarItem;
-  private readonly _contextItem: vscode.StatusBarItem;
-  private _storage?: vscode.Memento;
 
-  constructor(storage?: vscode.Memento) {
-    this._storage = storage;
+  constructor() {
     this._item = vscode.window.createStatusBarItem(
       'codebrain.status',
       vscode.StatusBarAlignment.Left,
@@ -80,34 +71,6 @@ export class CodeBrainStatusBar implements vscode.Disposable {
     this._item.name = 'CodeBrain';
     this.setState('unknown');
     this._item.show();
-
-    this._contextItem = vscode.window.createStatusBarItem(
-      'codebrain.context',
-      vscode.StatusBarAlignment.Left,
-      99,
-    );
-    this._contextItem.name = 'CodeBrain Context';
-    this._updateContextDisplay();
-    this._contextItem.show();
-  }
-
-  private _updateContextDisplay(): void {
-    if (!this._storage) {
-      this._contextItem.hide();
-      return;
-    }
-
-    const activeContext = getActiveContext(this._storage);
-    if (!activeContext) {
-      this._contextItem.hide();
-      return;
-    }
-
-    const typeIcon = activeContext.type === 'repo' ? '$(repo)' : '$(server)';
-    this._contextItem.text = `${typeIcon} ${activeContext.type === 'repo' ? 'Repo' : 'Group'}: ${activeContext.name}`;
-    this._contextItem.tooltip = `Active ${activeContext.type === 'repo' ? 'Repository' : 'Group'}: ${activeContext.name}\nClick to change`;
-    this._contextItem.command = 'codebrain.showContext';
-    this._contextItem.show();
   }
 
   setState(state: IndexState, details?: IndexTooltipDetails): void {
@@ -119,73 +82,32 @@ export class CodeBrainStatusBar implements vscode.Disposable {
     this._item.command = cfg.command;
   }
 
+  refreshContext(): void {
+    this.setState('unknown');
+  }
+
   private _buildTooltip(state: IndexState, fallback: string, details?: IndexTooltipDetails): string {
     if (!details) {
       return fallback;
     }
 
-    if (details.groupRepos && details.groupRepos.length > 0) {
-      return this._buildGroupTooltip(state, fallback, details);
-    }
-
-    if (state !== 'fresh' && state !== 'stale') {
-      return fallback;
-    }
-
+    const pending = details.pendingChanges;
+    const pendingTotal = pending ? pending.added + pending.modified + pending.removed : 0;
     const lines = [
-      `Repository: ${details.repository ?? '-'}`,
-      `Indexed: ${details.indexed ?? '-'}`,
-      `Indexed commit: ${details.indexedCommit ?? '-'}`,
-      `Current commit: ${details.currentCommit ?? '-'}`,
-      `Status: ${details.status ?? (state === 'fresh' ? 'up-to-date' : 'stale')}`,
+      `Project: ${details.projectPath ?? '-'}`,
+      `Files: ${details.fileCount ?? '-'}`,
+      `Nodes: ${details.nodeCount ?? '-'}`,
+      `Edges: ${details.edgeCount ?? '-'}`,
+      `Last indexed: ${details.lastIndexed ?? '-'}`,
+      `Pending changes: ${pendingTotal}`,
       '',
-      state === 'fresh' ? 'Click to view status.' : 'Click to re-index.',
+      state === 'stale' ? 'Click to sync.' : 'Click to view status.',
     ];
 
     return lines.join('\n');
-  }
-
-  private _buildGroupTooltip(state: IndexState, fallback: string, details: IndexTooltipDetails): string {
-    const repos = details.groupRepos ?? [];
-    if (repos.length === 0) {
-      return fallback;
-    }
-
-    const lines = [
-      `Group: ${details.groupName ?? '-'}`,
-      `Last sync: ${details.lastSync ?? 'never synced'}`,
-      '',
-      'Repo index / contracts status:',
-    ];
-
-    let anyContractsStale = false;
-    for (const repo of repos) {
-      let statusText = repo.indexStatus.toUpperCase();
-      if (repo.indexStatus === 'stale' && typeof repo.commitsBehind === 'number') {
-        statusText += ` (${repo.commitsBehind} behind)`;
-      }
-      const contractsFlag = repo.contractsStale ? ' (contracts stale)' : '';
-      if (repo.contractsStale) anyContractsStale = true;
-      lines.push(`- ${repo.path}: ${statusText}${contractsFlag}`);
-    }
-
-    if (anyContractsStale) {
-      lines.push('');
-      lines.push('Note: "contracts stale" means the group Contract Registry snapshot is out-of-date for that repo.');
-      lines.push('Fix: re-run `gitnexus analyze` in the affected repo(s), then `gitnexus group sync <group>` to update contracts.json.');
-    }
-
-    lines.push('');
-    lines.push(state === 'stale' || state === 'not-indexed' ? 'Click to re-index.' : 'Click to view status.');
-    return lines.join('\n');
-  }
-
-  refreshContext(): void {
-    this._updateContextDisplay();
   }
 
   dispose(): void {
     this._item.dispose();
-    this._contextItem.dispose();
   }
 }

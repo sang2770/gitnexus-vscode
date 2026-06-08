@@ -1,114 +1,61 @@
-﻿import * as vscode from "vscode";
+import * as vscode from 'vscode';
 import {
   type AnalyzeOptions,
   analyzeCommand,
-  analyzeTreeItemCommand
-} from "./commands/analyze.js";
-import {
-  cleanAllCommand,
-  cleanCommand,
-  listReposCommand,
-  statusCommand,
-} from "./commands/clean.js";
-import { CodeBrainEditFilesTool } from "./tools/edit-files-tool.js";
-import {
-  addRepoToGroupCommand,
-  clearActivationCommand,
-  createGroupCommand,
-  removeRepoFromGroupCommand,
-  repoMenuCommand,
-  selectGroupCommand,
-  selectRepoCommand,
-  showActiveContextCommand,
-  syncGroupCommand,
-} from "./commands/group.js";
-import {
-  jiraPlanAndQueryCommand,
-  openDashboardCommand,
-  prReviewCommand,
-  queryCommand,
-  serveCommand,
-  wikiCommand,
-} from "./commands/misc.js";
-import { installCliCommand, setupCommand } from "./commands/setup.js";
-import { runStartupHealthCheck } from "./config/startup-health-check.js";
-import { syncActiveContextSkill } from "./process/active-context-skill.js";
+  analyzeTreeItemCommand,
+} from './commands/analyze.js';
+import { cleanCommand, statusCommand } from './commands/clean.js';
+import { prReviewCommand, queryCommand } from './commands/misc.js';
+import { createCopilotAgentCommand, installCliCommand, setupCommand } from './commands/setup.js';
+import { selectTokenOptimizationModeCommand } from './commands/token-optimization.js';
+import { openWorkflowChatCommand } from './commands/workflow.js';
+import { runStartupHealthCheck } from './config/startup-health-check.js';
 import {
   getOutputChannel,
-  getWorkspaceRoot,
   initializeCodeBrainRuntime,
-} from "./process/cli-runner.js";
-import { ensureWorkspaceActiveContext } from "./process/group-context.js";
-import { StalenessMonitor } from "./staleness/staleness-monitor.js";
-import { createGitNexusParticipant } from "./ui/chat-participant.js";
-import { CodeBrainStatusBar } from "./ui/status-bar.js";
+} from './process/cli-runner.js';
+import { registerCodeGraphMcpProvider } from './process/mcp-provider.js';
+import { StalenessMonitor } from './staleness/staleness-monitor.js';
+import { createCodeGraphParticipant } from './ui/chat-participant.js';
 import {
-  AgentsTreeProvider,
-  GroupsReposTreeProvider,
-  QuickActionsTreeProvider,
-} from "./ui/tree-view.js";
+  askCodeBrainAboutImpactTarget,
+  ImpactLensTreeProvider,
+  openImpactLensLocation,
+  runImpactLensAnalysis,
+} from './ui/impact-lens.js';
+import { CodeBrainStatusBar } from './ui/status-bar.js';
+import { AgentsTreeProvider, QuickActionsTreeProvider } from './ui/tree-view.js';
 
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = getOutputChannel();
   initializeCodeBrainRuntime(context.globalStorageUri.fsPath);
-  void syncActiveContextSkill(context.globalState);
-  context.subscriptions.push(
-    vscode.lm.registerTool("codebrain_editFiles", new CodeBrainEditFilesTool()),
-  );
 
-  // ----------------------------------------------------------------
-  // Status bar
-  // ----------------------------------------------------------------
-  const statusBar = new CodeBrainStatusBar(context.globalState);
+  context.subscriptions.push(registerCodeGraphMcpProvider(context));
+  const statusBar = new CodeBrainStatusBar();
   context.subscriptions.push(statusBar);
 
-  // ----------------------------------------------------------------
-  // Staleness monitor (deferred: starts after a brief delay to let startup settle)
-  // ----------------------------------------------------------------
   let staleness: StalenessMonitor | undefined;
   setTimeout(() => {
-    staleness = new StalenessMonitor(statusBar, context.globalState);
+    staleness = new StalenessMonitor(statusBar);
     staleness.start();
     context.subscriptions.push(staleness);
   }, 1000);
 
-  // ----------------------------------------------------------------
-  // Tree views
-  // ----------------------------------------------------------------
   const quickActionsProvider = new QuickActionsTreeProvider();
   const agentsProvider = new AgentsTreeProvider();
-  const groupsReposProvider = new GroupsReposTreeProvider(context.globalState);
-
-  void (async () => {
-    const resolved = await ensureWorkspaceActiveContext(context.globalState, {
-      autoSelectSingle: true,
-    });
-    if (resolved) {
-      await syncActiveContextSkill(context.globalState);
-      statusBar.refreshContext();
-      groupsReposProvider.refresh();
-    }
-  })();
-
+  const impactLensProvider = new ImpactLensTreeProvider();
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider(
-      "codebrain.quickActions",
-      quickActionsProvider,
-    ),
-    vscode.window.registerTreeDataProvider("codebrain.agents", agentsProvider),
-    vscode.window.registerTreeDataProvider(
-      "codebrain.groupsRepos",
-      groupsReposProvider,
-    ),
+    vscode.window.registerTreeDataProvider('codebrain.quickActions', quickActionsProvider),
+    vscode.window.registerTreeDataProvider('codebrain.agents', agentsProvider),
+    vscode.window.registerTreeDataProvider('codebrain.impactLens', impactLensProvider),
+    vscode.window.onDidChangeActiveTextEditor(() => impactLensProvider.refreshContext()),
+    vscode.window.onDidChangeTextEditorSelection(() => impactLensProvider.refreshContext()),
   );
 
-  const runAnalyzeWithStatus = async (
-    opts: AnalyzeOptions = {},
-  ): Promise<boolean> => {
-    statusBar.setState("indexing");
+  const runAnalyzeWithStatus = async (opts: AnalyzeOptions = {}): Promise<boolean> => {
+    statusBar.setState('indexing');
     try {
-      const ok = await analyzeCommand(opts, context);
-      return ok;
+      return await analyzeCommand(opts);
     } finally {
       if (staleness) {
         await staleness.forceCheck();
@@ -116,13 +63,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  // ----------------------------------------------------------------
-  // Commands
-  // ----------------------------------------------------------------
-  const cmds: Array<[string, (...args: any[]) => unknown]> = [
-    ["codebrain.setup", setupCommand],
+  const commands: Array<[string, (...args: any[]) => unknown]> = [
+    ['codebrain.setup', setupCommand],
     [
-      "codebrain.setupAndAnalyze",
+      'codebrain.setupAndAnalyze',
       async () => {
         const setupCompleted = await setupCommand();
         if (!setupCompleted) {
@@ -131,16 +75,17 @@ export function activate(context: vscode.ExtensionContext): void {
         return runAnalyzeWithStatus();
       },
     ],
-    ["codebrain.installCli", installCliCommand],
-
-    ["codebrain.analyze", () => runAnalyzeWithStatus()],
-    ["codebrain.analyzeForce", () => runAnalyzeWithStatus({ force: true })],
+    ['codebrain.installCli', installCliCommand],
+    ['codebrain.createCopilotAgent', createCopilotAgentCommand],
+    ['codebrain.tokenOptimization.selectMode', selectTokenOptimizationModeCommand],
+    ['codebrain.analyze', () => runAnalyzeWithStatus()],
+    ['codebrain.analyzeForce', () => runAnalyzeWithStatus({ force: true })],
     [
-      "codebrain.analyzeTreeItem",
+      'codebrain.analyzeTreeItem',
       async (...args) => {
-        statusBar.setState("indexing");
+        statusBar.setState('indexing');
         try {
-          return await analyzeTreeItemCommand(args[0], context);
+          return await analyzeTreeItemCommand(args[0]);
         } finally {
           if (staleness) {
             await staleness.forceCheck();
@@ -148,92 +93,49 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ],
-    // ['codebrain.analyzeEmbeddings', analyzeWithEmbeddingsCommand],
-
-    ["codebrain.status", () => statusCommand(context)],
-    ["codebrain.listRepos", listReposCommand],
-    ["codebrain.clean", cleanCommand],
-    ["codebrain.cleanAll", cleanAllCommand],
-
-    ["codebrain.serve", serveCommand],
-    ["codebrain.openDashboard", () => openDashboardCommand(context)],
-    ["codebrain.generateWiki", wikiCommand],
-    ["codebrain.query", () => queryCommand(context)],
-    ["codebrain.jiraPlanAndQuery", () => jiraPlanAndQueryCommand(context)],
-    ["codebrain.prReview", () => prReviewCommand(context)],
-
-    // Group & Context commands
+    ['codebrain.status', statusCommand],
+    ['codebrain.clean', cleanCommand],
+    ['codebrain.query', queryCommand],
+    ['codebrain.prReview', prReviewCommand],
+    ['codebrain.workflow.architecture', () => openWorkflowChatCommand('architecture')],
+    ['codebrain.workflow.explain', () => openWorkflowChatCommand('explain')],
+    ['codebrain.workflow.impact', () => openWorkflowChatCommand('impact')],
+    ['codebrain.workflow.review', prReviewCommand],
+    ['codebrain.workflow.test', () => openWorkflowChatCommand('test')],
+    ['codebrain.workflow.detectChange', () => openWorkflowChatCommand('detect_change')],
+    ['codebrain.workflow.fixPlan', () => openWorkflowChatCommand('fix_plan')],
     [
-      "codebrain.repoMenu",
-      (...args) =>
-        repoMenuCommand(
-          context,
-          args[0] as string | { meta?: Record<string, string> } | undefined,
-        ),
-    ],
-    [
-      "codebrain.selectRepo",
-      (...args) =>
-        selectRepoCommand(
-          context,
-          args[0] as string | { meta?: Record<string, string> } | undefined,
-        ),
-    ],
-    [
-      "codebrain.selectGroup",
-      (...args) =>
-        selectGroupCommand(
-          context,
-          args[0] as string | { meta?: Record<string, string> } | undefined,
-        ),
-    ],
-    ["codebrain.createGroup", createGroupCommand],
-    ["codebrain.syncGroup", syncGroupCommand],
-    ["codebrain.addRepoToGroup", addRepoToGroupCommand],
-    ["codebrain.removeRepoFromGroup", removeRepoFromGroupCommand],
-    ["codebrain.clearContext", () => clearActivationCommand(context)],
-    ["codebrain.showContext", () => showActiveContextCommand(context)],
-
-    [
-      "codebrain.refreshTreeView",
+      'codebrain.refreshTreeView',
       () => {
         quickActionsProvider.refresh();
         agentsProvider.refresh();
-        groupsReposProvider.refresh();
+        impactLensProvider.refreshContext();
         statusBar.refreshContext();
         if (staleness) {
           void staleness.forceCheck();
         }
       },
     ],
+    ['codebrain.impactLens.impact', () => runImpactLensAnalysis(impactLensProvider, 'impact')],
+    ['codebrain.impactLens.callers', () => runImpactLensAnalysis(impactLensProvider, 'callers')],
+    ['codebrain.impactLens.callees', () => runImpactLensAnalysis(impactLensProvider, 'callees')],
+    ['codebrain.impactLens.affectedTests', () => runImpactLensAnalysis(impactLensProvider, 'affected')],
+    ['codebrain.impactLens.openLocation', (location) => openImpactLensLocation(location)],
+    ['codebrain.impactLens.askCodeBrain', () => askCodeBrainAboutImpactTarget(impactLensProvider)],
   ];
 
-  for (const [id, handler] of cmds) {
-    context.subscriptions.push(
-      vscode.commands.registerCommand(id, (...args: any[]) => handler(...args)),
-    );
+  for (const [id, handler] of commands) {
+    context.subscriptions.push(vscode.commands.registerCommand(id, (...args: any[]) => handler(...args)));
   }
 
-  // ----------------------------------------------------------------
-  // Chat Participant
-  // ----------------------------------------------------------------
-  outputChannel.appendLine("Initializing Git Nexus participant...");
+  outputChannel.appendLine('Initializing CodeGraph participant...');
   try {
-    const gitNexusParticipant = createGitNexusParticipant(context);
-    context.subscriptions.push(gitNexusParticipant);
+    context.subscriptions.push(createCodeGraphParticipant(context));
   } catch (err) {
-    outputChannel.appendLine(
-      `Failed to initialize Git Nexus participant: ${err}`,
-    );
+    outputChannel.appendLine(`Failed to initialize CodeGraph participant: ${err}`);
   }
 
-  // ----------------------------------------------------------------
-  // Startup initialization (fire-and-forget)
-  // ----------------------------------------------------------------
-  // Startup project health check: MCP presence + auto-setup + auto-start server
-  void runStartupHealthCheck(getWorkspaceRoot());
+  void runStartupHealthCheck();
 }
 
-export function deactivate(): void {
-  // Disposables registered via context.subscriptions are cleaned up automatically.
-}
+export function deactivate(): void {}

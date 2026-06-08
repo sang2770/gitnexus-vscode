@@ -1,7 +1,21 @@
-﻿import * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import { ensureCodeBrainCli } from '../process/prerequisites.js';
-import { runCodeBrain, getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
-import { getActiveRepoPath } from '../process/group-context.js';
+import { getOutputChannel, getWorkspaceRoot, runCodeBrain } from '../process/cli-runner.js';
+import { showStatusReport } from '../ui/report-panel.js';
+
+interface CodeGraphStatusJson {
+  initialized?: boolean;
+  projectPath?: string;
+  lastIndexed?: string | null;
+  fileCount?: number;
+  nodeCount?: number;
+  edgeCount?: number;
+  pendingChanges?: {
+    added?: number;
+    modified?: number;
+    removed?: number;
+  };
+}
 
 export async function cleanCommand(): Promise<void> {
   const ok = await ensureCodeBrainCli();
@@ -10,7 +24,7 @@ export async function cleanCommand(): Promise<void> {
   }
 
   const confirmed = await vscode.window.showWarningMessage(
-    'CodeBrain: Delete the index for the current workspace?',
+    'CodeBrain: Delete the CodeGraph index for the current workspace?',
     { modal: true },
     'Delete',
     'Cancel',
@@ -19,15 +33,18 @@ export async function cleanCommand(): Promise<void> {
     return;
   }
 
-  const channel = getOutputChannel();
-  channel.show(true);
-
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Cleaning index...', cancellable: false },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'CodeBrain: Removing CodeGraph index...',
+      cancellable: false,
+    },
     async () => {
-      const result = await runCodeBrain(['clean', '--force'], { cwd: getWorkspaceRoot() });
+      const result = await runCodeBrain(['uninit', getWorkspaceRoot(), '--force'], {
+        cwd: getWorkspaceRoot(),
+      });
       if (result.exitCode === 0) {
-        vscode.window.showInformationMessage('CodeBrain: Index deleted.');
+        vscode.window.showInformationMessage('CodeBrain: CodeGraph index deleted.');
       } else {
         vscode.window.showErrorMessage('CodeBrain: Clean failed. Check Output panel.');
       }
@@ -35,68 +52,80 @@ export async function cleanCommand(): Promise<void> {
   );
 }
 
-export async function cleanAllCommand(): Promise<void> {
+export async function statusCommand(): Promise<void> {
   const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
 
-  const confirmed = await vscode.window.showWarningMessage(
-    'CodeBrain: Delete ALL indexed repositories? This cannot be undone.',
-    { modal: true },
-    'Delete All',
-    'Cancel',
-  );
-  if (confirmed !== 'Delete All') {
-    return;
-  }
-
   const channel = getOutputChannel();
-  channel.show(true);
 
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Cleaning all indexes...', cancellable: false },
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'CodeBrain: Checking CodeGraph status...',
+      cancellable: false,
+    },
     async () => {
-      const result = await runCodeBrain(['clean', '--all', '--force'], { cwd: getWorkspaceRoot() });
-      if (result.exitCode === 0) {
-        vscode.window.showInformationMessage('CodeBrain: All indexes deleted.');
-      } else {
-        vscode.window.showErrorMessage('CodeBrain: Clean failed. Check Output panel.');
+      const workspaceRoot = getWorkspaceRoot();
+      const result = await runCodeBrain(['status', workspaceRoot, '--json'], {
+        cwd: workspaceRoot,
+        stream: false,
+      });
+
+      if (result.exitCode !== 0) {
+        vscode.window.showErrorMessage('CodeBrain: Failed to read CodeGraph status. Check Output panel.');
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(result.stdout) as CodeGraphStatusJson;
+        const status = deriveStatus(parsed);
+        channel.appendLine(result.stdout.trim());
+        showStatusReport(parsed, result.stdout);
+        vscode.window.showInformationMessage(formatStatusMessage(status, parsed));
+      } catch {
+        channel.appendLine(result.stdout.trim());
+        vscode.window.showWarningMessage('CodeBrain: CodeGraph status returned non-JSON output. Check Output panel.');
       }
     },
   );
 }
 
-export async function statusCommand(context?: vscode.ExtensionContext): Promise<void> {
-  const ok = await ensureCodeBrainCli();
-  if (!ok) {
-    return;
+type DerivedStatus = 'fresh' | 'stale' | 'not-indexed';
+
+function deriveStatus(status: CodeGraphStatusJson): DerivedStatus {
+  if (!status.initialized) {
+    return 'not-indexed';
   }
-  const channel = getOutputChannel();
-  channel.show(true);
 
-  const cwd = context ? (await getActiveRepoPath(context.globalState)) ?? getWorkspaceRoot() : getWorkspaceRoot();
+  const pending = status.pendingChanges;
+  const pendingTotal =
+    (pending?.added ?? 0) +
+    (pending?.modified ?? 0) +
+    (pending?.removed ?? 0);
 
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Checking status...', cancellable: false },
-    async () => {
-      await runCodeBrain(['status'], { cwd });
-    },
-  );
+  return pendingTotal > 0 ? 'stale' : 'fresh';
 }
 
-export async function listReposCommand(): Promise<void> {
-  const ok = await ensureCodeBrainCli();
-  if (!ok) {
-    return;
+function formatStatusMessage(status: DerivedStatus, parsed: CodeGraphStatusJson): string {
+  if (status === 'not-indexed') {
+    return 'CodeBrain: CodeGraph status is not-indexed.';
   }
-  const channel = getOutputChannel();
-  channel.show(true);
 
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Listing repositories...', cancellable: false },
-    async () => {
-      await runCodeBrain(['list'], { cwd: getWorkspaceRoot() });
-    },
-  );
+  const pending = parsed.pendingChanges;
+  const pendingTotal =
+    (pending?.added ?? 0) +
+    (pending?.modified ?? 0) +
+    (pending?.removed ?? 0);
+  const stats = [
+    parsed.fileCount !== undefined ? `${parsed.fileCount} files` : undefined,
+    parsed.nodeCount !== undefined ? `${parsed.nodeCount} nodes` : undefined,
+    parsed.edgeCount !== undefined ? `${parsed.edgeCount} edges` : undefined,
+  ].filter(Boolean).join(', ');
+  const suffix = stats ? ` (${stats})` : '';
+
+  return status === 'stale'
+    ? `CodeBrain: CodeGraph status is stale (${pendingTotal} pending changes).`
+    : `CodeBrain: CodeGraph status is fresh${suffix}.`;
 }

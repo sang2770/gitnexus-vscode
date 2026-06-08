@@ -1,45 +1,28 @@
 import * as vscode from 'vscode';
 import {
   ensureCodeBrainCliInstalled,
-  resolveNodeVersion,
+  getCodeGraphRuntimeDescriptor,
 } from '../process/cli-runner.js';
 
 export interface PrerequisiteStatus {
-  node: string | null;
-  npm: string | null;
-  codebrain: string | null;
+  runtime: string | null;
   ready: boolean;
 }
 
 export function checkPrerequisites(): PrerequisiteStatus {
-  const node = resolveNodeVersion();
+  const runtime = getCodeGraphRuntimeDescriptor();
   return {
-    node,
-    npm: null,
-    codebrain: null,
-    ready: !!node,
+    runtime: runtime?.command ?? null,
+    ready: !!runtime,
   };
 }
 
-/**
- * Ensure gitnexus CLI is available, offering to install if missing.
- * Returns true if CLI is available (pre-existing or just installed).
- */
 export async function ensureCodeBrainCli(token?: vscode.CancellationToken): Promise<boolean> {
-  const status = checkPrerequisites();
-
-  // Node not installed at all — nothing we can do
-  if (!status.node) {
+  const ok = await ensureCodeBrainCliInstalled(token);
+  if (!ok) {
     vscode.window.showErrorMessage(
-      'CodeBrain: Node.js is not installed. Please install Node.js ≥20 and try again.',
-      'Get Node.js',
-    ).then((choice) => {
-      if (choice === 'Get Node.js') {
-        vscode.env.openExternal(vscode.Uri.parse('https://nodejs.org'));
-      }
-    });
-    return false;
+      'CodeBrain: CodeGraph runtime is not available. Run "CodeBrain: Prepare CodeGraph Runtime" or rebuild the extension.',
+    );
   }
-
-  return ensureCodeBrainCliInstalled(token);
+  return ok;
 }

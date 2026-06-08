@@ -1,6 +1,5 @@
-﻿import * as vscode from "vscode";
-import { execFile, execFileSync, spawn } from "child_process";
-import { promisify } from "util";
+import * as vscode from "vscode";
+import { execFileSync, spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -10,21 +9,32 @@ export interface CliRunResult {
   exitCode: number;
 }
 
+export interface SpawnOptions {
+  cwd?: string;
+  stream?: boolean;
+  token?: vscode.CancellationToken;
+  env?: Record<string, string>;
+}
+
+export interface CodeGraphRuntimeDescriptor {
+  command: string;
+  args: string[];
+  shell: boolean;
+  runtimeRoot: string;
+  kind: "bundled" | "development";
+}
+
 let _outputChannel: vscode.OutputChannel | undefined;
 let _extensionStorageRoot: string | undefined;
-let _cliInstallPromise: Thenable<boolean> | undefined;
-let _latestVersionCache:
-  | {
-      value: string | null;
-      checkedAt: number;
-    }
-  | undefined;
+let _cliBuildPromise: Thenable<boolean> | undefined;
 
-const CLI_PACKAGE_NAME = "@xuansang2770/gitnexus";
-const CLI_INSTALL_FOLDER = "gitnexus-cli";
-const CLI_SETUP_STATE_FILE = ".codebrain-cli-setup-done";
-const CLI_VERSION_CHECK_SUCCESS_TTL_MS = 6 * 60 * 60 * 1000;
-const CLI_VERSION_CHECK_FAILURE_TTL_MS = 10 * 60 * 1000;
+const CLI_SETUP_STATE_FILE = ".codebrain-codegraph-setup-done";
+const ANSI_ESCAPE_SEQUENCE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/gu;
+
+function sanitizeOutputForChannel(text: string): string {
+  // Strip ANSI CSI sequences and normalize carriage-return progress updates.
+  return text.replace(ANSI_ESCAPE_SEQUENCE_PATTERN, "").replace(/\r(?!\n)/gu, "\n");
+}
 
 export function getOutputChannel(): vscode.OutputChannel {
   if (!_outputChannel) {
@@ -38,141 +48,121 @@ export function initializeCodeBrainRuntime(storageRoot: string): void {
 }
 
 export function getSetupStateMarkerPath(): string {
-  return path.join(getCliInstallRoot(), CLI_SETUP_STATE_FILE);
+  const root =
+    _extensionStorageRoot ??
+    path.join(path.resolve(__dirname, "..", ".."), "runtime", "codegraph");
+  return path.join(root, CLI_SETUP_STATE_FILE);
 }
 
-function getCliInstallRoot(): string {
-  if (_extensionStorageRoot) {
-    return path.join(_extensionStorageRoot, CLI_INSTALL_FOLDER);
-  }
-  const extensionRoot = path.resolve(__dirname, "..", "..");
-  return path.join(extensionRoot, "runtime", "gitnexus");
+function getExtensionRoot(): string {
+  return path.resolve(__dirname, "..", "..");
 }
 
-function ensureCliInstallRoot(): void {
-  fs.mkdirSync(getCliInstallRoot(), { recursive: true });
+function getBundledRuntimeRoot(): string {
+  return path.join(getExtensionRoot(), "runtime", "codegraph");
 }
 
-function getInstalledPackageJsonPath(): string {
-  return path.join(
-    getCliInstallRoot(),
-    "node_modules",
-    "@xuansang2770",
-    "gitnexus",
-    "package.json",
-  );
+function getDevelopmentCliPath(): string {
+  return path.join(getExtensionRoot(), "codegraph", "dist", "bin", "codegraph.js");
 }
 
-export function getInstalledCliPath(): string | null {
-  const installRoot = getCliInstallRoot();
-  const candidates = [
-    path.join(
-      installRoot,
-      "node_modules",
-      "@xuansang2770",
-      "gitnexus",
-      "dist",
-      "cli",
-      "index.js",
-    ),
-    path.join(
-      installRoot,
-      "node_modules",
-      "@xuansang2770",
-      "gitnexus",
-      "dist",
-      "index.js",
-    ),
-  ];
+function getDevelopmentCodeGraphRoot(): string {
+  return path.join(getExtensionRoot(), "codegraph");
+}
 
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
+function getBundledRuntimeDescriptor(args: string[]): CodeGraphRuntimeDescriptor | null {
+  const runtimeRoot = getBundledRuntimeRoot();
+
+  if (process.platform === "win32") {
+    const nodeExe = path.join(runtimeRoot, "node.exe");
+    const entry = path.join(runtimeRoot, "lib", "dist", "bin", "codegraph.js");
+    if (fs.existsSync(nodeExe) && fs.existsSync(entry)) {
+      return {
+        command: nodeExe,
+        args: ["--liftoff-only", entry, ...args],
+        shell: false,
+        runtimeRoot,
+        kind: "bundled",
+      };
     }
+    return null;
   }
+
+  const launcher = path.join(runtimeRoot, "bin", "codegraph");
+  if (fs.existsSync(launcher)) {
+    return {
+      command: launcher,
+      args,
+      shell: false,
+      runtimeRoot,
+      kind: "bundled",
+    };
+  }
+
   return null;
 }
 
-function getInstalledCliVersion(): string | null {
-  const pkgPath = getInstalledPackageJsonPath();
-  if (!fs.existsSync(pkgPath)) {
+function getDevelopmentRuntimeDescriptor(args: string[]): CodeGraphRuntimeDescriptor | null {
+  const cliPath = getDevelopmentCliPath();
+  if (!fs.existsSync(cliPath)) {
     return null;
   }
-  try {
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as {
-      version?: string;
-    };
-    return pkg.version ?? null;
-  } catch {
-    return null;
-  }
-}
 
-async function getLatestCliVersion(npm: string): Promise<string | null> {
-  const execFileAsync = promisify(execFile);
-  try {
-    const command = process.platform === "win32" ? "cmd" : npm;
-    const args =
-      process.platform === "win32"
-        ? ["/c", npm, "view", CLI_PACKAGE_NAME, "version", "--json"]
-        : ["view", CLI_PACKAGE_NAME, "version", "--json"];
-
-    const { stdout } = await execFileAsync(command, args, {
-      cwd: getCliInstallRoot(),
-      windowsHide: true,
-      timeout: 15000,
-      maxBuffer: 1024 * 1024,
-    });
-    const parsed = JSON.parse(stdout.trim()) as string;
-    return typeof parsed === "string" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function getCachedLatestCliVersion(): string | null | undefined {
-  if (!_latestVersionCache) {
-    return undefined;
-  }
-
-  const ttl =
-    _latestVersionCache.value === null
-      ? CLI_VERSION_CHECK_FAILURE_TTL_MS
-      : CLI_VERSION_CHECK_SUCCESS_TTL_MS;
-
-  if (Date.now() - _latestVersionCache.checkedAt < ttl) {
-    return _latestVersionCache.value;
-  }
-
-  return undefined;
-}
-
-function setCachedLatestCliVersion(value: string | null): void {
-  _latestVersionCache = {
-    value,
-    checkedAt: Date.now(),
+  return {
+    command: "node",
+    args: ["--liftoff-only", cliPath, ...args],
+    shell: false,
+    runtimeRoot: getDevelopmentCodeGraphRoot(),
+    kind: "development",
   };
 }
 
-/** Resolve the codebrain binary path from PATH, returns null if not found.
- *  On Windows, `where` returns the .cmd shim â€” we keep that path but mark it
- *  so callers know to use shell:true (or cmd /c) when spawning.
- */
+export function getCodeGraphRuntimeDescriptor(args: string[] = []): CodeGraphRuntimeDescriptor | null {
+  return getBundledRuntimeDescriptor(args) ?? getDevelopmentRuntimeDescriptor(args);
+}
 
-/**
- * Build the spawn descriptor for running codebrain.
- * On Windows, .cmd shims cannot be spawned with shell:false â€” wrap via cmd /c.
- */
+export function hasBundledCodeGraphRuntime(): boolean {
+  return Boolean(getBundledRuntimeDescriptor([]));
+}
+
+export function getInstalledCliVersion(): string | undefined {
+  const descriptor = getCodeGraphRuntimeDescriptor();
+  if (!descriptor) {
+    return undefined;
+  }
+
+  const candidates = [
+    path.join(descriptor.runtimeRoot, "lib", "package.json"),
+    path.join(descriptor.runtimeRoot, "package.json"),
+  ];
+  const packageJsonPath = candidates.find((candidate) => fs.existsSync(candidate));
+
+  try {
+    if (!packageJsonPath) {
+      return undefined;
+    }
+    const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
+      version?: string;
+    };
+    return pkg.version;
+  } catch {
+    return undefined;
+  }
+}
+
 function buildSpawnDescriptor(args: string[]): {
   command: string;
   args: string[];
   shell: boolean;
 } {
-  const localCli = getInstalledCliPath();
-  if (!localCli) {
-    throw new Error("CodeBrain CLI not found. Run CodeBrain: Setup first.");
+  const descriptor = getCodeGraphRuntimeDescriptor(args);
+  if (!descriptor) {
+    throw new Error(
+      "CodeGraph runtime not found. Run npm run build, or rebuild the extension package.",
+    );
   }
-  return { command: "node", args: [localCli, ...args], shell: false };
+
+  return descriptor;
 }
 
 function quoteForShell(arg: string): string {
@@ -182,16 +172,11 @@ function quoteForShell(arg: string): string {
   return arg;
 }
 
-/**
- * Build a shell command line using the same resolver strategy as runCodeBrain.
- * Useful for long-running commands that need to run in a VS Code terminal.
- */
 export function buildCodeBrainTerminalCommand(args: string[]): string {
   const descriptor = buildSpawnDescriptor(args);
   return [descriptor.command, ...descriptor.args].map(quoteForShell).join(" ");
 }
 
-/** Check if npm is available; returns the resolved path or 'npm' for use with cmd /c */
 export function resolveNpmBin(): string | null {
   try {
     const cmd = process.platform === "win32" ? "where" : "which";
@@ -200,44 +185,29 @@ export function resolveNpmBin(): string | null {
       timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
     });
-    const bin = result
-      .split("\n")
-      .map((l) => l.trim())
-      .find((l) => l.length > 0);
-    return bin ?? null;
+    return (
+      result
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find((line) => line.length > 0) ?? null
+    );
   } catch {
     return null;
   }
 }
 
-/** Check if node is available and meets minimum version */
 export function resolveNodeVersion(): string | null {
   try {
-    const result = execFileSync("node", ["--version"], {
+    return execFileSync("node", ["--version"], {
       encoding: "utf-8",
       timeout: 5000,
       stdio: ["ignore", "pipe", "ignore"],
-    });
-    return result.trim();
+    }).trim();
   } catch {
     return null;
   }
 }
 
-export interface SpawnOptions {
-  cwd?: string;
-  /** Stream output to output channel in real time */
-  stream?: boolean;
-  /** CancellationToken to abort the process */
-  token?: vscode.CancellationToken;
-  /** Extra env vars */
-  env?: Record<string, string>;
-}
-
-/**
- * Run a gitnexus CLI command.
- * Streams stdout/stderr to the Output Channel in real time.
- */
 export async function runCodeBrain(
   args: string[],
   opts: SpawnOptions = {},
@@ -245,8 +215,8 @@ export async function runCodeBrain(
   const channel = getOutputChannel();
   const ready = await ensureCodeBrainCliInstalled(opts.token);
   if (!ready) {
-    const message = "CodeBrain CLI install/update failed.";
-    channel.appendLine(`\n$ codebrain ${args.join(" ")}`);
+    const message = "CodeGraph runtime is unavailable.";
+    channel.appendLine(`\n$ codegraph ${args.join(" ")}`);
     channel.appendLine(`[process error: ${message}]`);
     return { stdout: "", stderr: message, exitCode: 1 };
   }
@@ -256,26 +226,24 @@ export async function runCodeBrain(
     descriptor = buildSpawnDescriptor(args);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    channel.appendLine(`\n$ codebrain ${args.join(" ")}`);
+    channel.appendLine(`\n$ codegraph ${args.join(" ")}`);
     channel.appendLine(`[process error: ${message}]`);
     return { stdout: "", stderr: message, exitCode: 1 };
   }
+
   const cwd = opts.cwd ?? getWorkspaceRoot();
   const env = { ...process.env, ...(opts.env ?? {}) };
 
-  channel.appendLine(`\n$ codebrain ${args.join(" ")}`);
+  channel.appendLine(`\n$ codegraph ${args.join(" ")}`);
   channel.appendLine(`  cwd: ${cwd}`);
-  channel.appendLine(
-    `  exec: ${descriptor.command} ${descriptor.args.join(" ")}`,
-  );
+  channel.appendLine(`  exec: ${descriptor.command} ${descriptor.args.join(" ")}`);
 
   return new Promise<CliRunResult>((resolve) => {
-    const { spawn } =
-      require("child_process") as typeof import("child_process");
     const proc = spawn(descriptor.command, descriptor.args, {
       cwd,
       env,
       shell: descriptor.shell,
+      windowsHide: true,
     });
 
     let stdout = "";
@@ -285,7 +253,7 @@ export async function runCodeBrain(
       const text = chunk.toString();
       stdout += text;
       if (opts.stream !== false) {
-        channel.append(text);
+        channel.append(sanitizeOutputForChannel(text));
       }
     });
 
@@ -293,7 +261,7 @@ export async function runCodeBrain(
       const text = chunk.toString();
       stderr += text;
       if (opts.stream !== false) {
-        channel.append(text);
+        channel.append(sanitizeOutputForChannel(text));
       }
     });
 
@@ -303,7 +271,7 @@ export async function runCodeBrain(
 
     proc.on("close", (code) => {
       const exitCode = code ?? 1;
-      channel.appendLine(`\n[gitnexus exited: ${exitCode}]`);
+      channel.appendLine(`\n[codegraph exited: ${exitCode}]`);
       resolve({ stdout, stderr, exitCode });
     });
 
@@ -314,94 +282,6 @@ export async function runCodeBrain(
   });
 }
 
-/**
- * Run npm install -g gitnexus and stream output.
- */
-export async function installCodeBrainCli(
-  token?: vscode.CancellationToken,
-  options: { uninstallFirst?: boolean } = {},
-): Promise<boolean> {
-  const channel = getOutputChannel();
-  channel.show(true);
-  channel.appendLine(`\n$ Installing CodeBrain CLI...`);
-
-  const npm = resolveNpmBin();
-  if (!npm) {
-    channel.appendLine("[ERROR] npm not found. Please install Node.js first.");
-    return false;
-  }
-
-  ensureCliInstallRoot();
-  const installRoot = getCliInstallRoot();
-  const packageJsonPath = path.join(installRoot, "package.json");
-  const npmCmd = process.platform === "win32" ? "cmd" : npm;
-  const npmInitArgs =
-    process.platform === "win32" ? ["/c", npm, "init", "-y"] : ["init", "-y"];
-  const npmInstallArgs =
-    process.platform === "win32"
-      ? [
-          "/c",
-          npm,
-          "install",
-          "--no-save",
-          "--no-audit",
-          "--no-fund",
-          `${CLI_PACKAGE_NAME}@latest`,
-        ]
-      : [
-          "install",
-          "--no-save",
-          "--no-audit",
-          "--no-fund",
-          `${CLI_PACKAGE_NAME}@latest`,
-        ];
-  const npmUninstallArgs =
-    process.platform === "win32"
-      ? ["/c", npm, "uninstall", CLI_PACKAGE_NAME]
-      : ["uninstall", CLI_PACKAGE_NAME];
-  if (!fs.existsSync(packageJsonPath)) {
-    // Step 1: Always run 'npm init -y'
-    try {
-      await runCommand(npmCmd, npmInitArgs, installRoot, channel, token);
-    } catch (err) {
-      channel.appendLine(
-        `[ERROR] npm init -y failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return false;
-    }
-  }
-
-  if (options.uninstallFirst) {
-    // Force a clean update path: remove old package before installing latest.
-    try {
-      await runCommand(npmCmd, npmUninstallArgs, installRoot, channel, token);
-    } catch (err) {
-      channel.appendLine(
-        `[ERROR] npm uninstall failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return false;
-    }
-  }
-
-  // Step 2: Run npm install
-  try {
-    await runCommand(npmCmd, npmInstallArgs, installRoot, channel, token);
-    const ok = Boolean(getInstalledCliPath());
-    channel.appendLine(
-      ok
-        ? "\n[CodeBrain CLI installed successfully]"
-        : "\n[install failed: CLI not found after install]",
-    );
-    return ok;
-  } catch (err) {
-    channel.appendLine(
-      `[ERROR] npm install failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return false;
-  }
-}
-
-// Helper: run a command with async/await
 async function runCommand(
   cmd: string,
   args: string[],
@@ -414,13 +294,14 @@ async function runCommand(
       cwd,
       env: process.env,
       shell: false,
+      windowsHide: true,
     });
 
     proc.stdout?.on("data", (chunk: Buffer) =>
-      channel.append(chunk.toString()),
+      channel.append(sanitizeOutputForChannel(chunk.toString())),
     );
     proc.stderr?.on("data", (chunk: Buffer) =>
-      channel.append(chunk.toString()),
+      channel.append(sanitizeOutputForChannel(chunk.toString())),
     );
 
     token?.onCancellationRequested(() => {
@@ -436,87 +317,86 @@ async function runCommand(
         reject(new Error(`Process exited with code ${code}`));
       }
     });
-
     proc.on("error", (err) => reject(err));
   });
+}
+
+export async function installCodeBrainCli(
+  token?: vscode.CancellationToken,
+): Promise<boolean> {
+  const channel = getOutputChannel();
+  channel.show(true);
+
+  const sourceRoot = getDevelopmentCodeGraphRoot();
+  if (!fs.existsSync(path.join(sourceRoot, "package.json"))) {
+    channel.appendLine("[CodeGraph] Local CodeGraph source is not available.");
+    return hasBundledCodeGraphRuntime();
+  }
+
+  const npm = resolveNpmBin();
+  if (!npm) {
+    channel.appendLine("[CodeGraph] npm not found. Install Node.js/npm first.");
+    return false;
+  }
+
+  const npmCmd = process.platform === "win32" ? "cmd" : npm;
+  const ciArgs =
+    process.platform === "win32" ? ["/c", npm, "ci"] : ["ci"];
+  const buildArgs =
+    process.platform === "win32"
+      ? ["/c", npm, "run", "build"]
+      : ["run", "build"];
+
+  try {
+    channel.appendLine(`\n[CodeGraph] Building local CodeGraph from ${sourceRoot}`);
+    await runCommand(npmCmd, ciArgs, sourceRoot, channel, token);
+    await runCommand(npmCmd, buildArgs, sourceRoot, channel, token);
+    channel.appendLine("[CodeGraph] Bundling self-contained runtime...");
+    const bundleArgs =
+      process.platform === "win32"
+        ? ["/c", npm, "run", "bundle:cli"]
+        : ["run", "bundle:cli"];
+    await runCommand(npmCmd, bundleArgs, getExtensionRoot(), channel, token);
+    const ok = Boolean(getBundledRuntimeDescriptor([]));
+    channel.appendLine(
+      ok
+        ? "[CodeGraph] Bundled is ready."
+        : "[CodeGraph] Build completed but bundled was not found.",
+    );
+    return ok;
+  } catch (err) {
+    channel.appendLine(
+      `[CodeGraph] Build failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
 }
 
 export async function ensureCodeBrainCliInstalled(
   token?: vscode.CancellationToken,
 ): Promise<boolean> {
-  const channel = getOutputChannel();
-  const npm = resolveNpmBin();
-  if (!npm) {
-    return false;
-  }
-
-  ensureCliInstallRoot();
-
-  const installedCli = getInstalledCliPath();
-  if (!installedCli) {
-    // CLI not installed - check if installation is already in progress
-    if (_cliInstallPromise) {
-      return _cliInstallPromise;
-    }
-
-    // Start new installation and cache the promise
-    const installPromise = vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: "CodeBrain: Installing CLI...",
-        cancellable: false,
-      },
-      () => installCodeBrainCli(token),
-    );
-    _cliInstallPromise = installPromise;
-
-    const result = await installPromise;
-    _cliInstallPromise = undefined; // Clear cache after install completes
-    return result;
-  }
-
-  const current = getInstalledCliVersion();
-  const cachedLatest = getCachedLatestCliVersion();
-  const latest =
-    cachedLatest !== undefined ? cachedLatest : await getLatestCliVersion(npm);
-  if (cachedLatest === undefined) {
-    // Cache both successful and failed lookups to avoid repeated network waits.
-    setCachedLatestCliVersion(latest);
-  }
-  if (!current || !latest) {
+  if (hasBundledCodeGraphRuntime()) {
     return true;
   }
 
-  if (current !== latest) {
-    channel.appendLine(
-      `[CodeBrain] Updating CLI from ${current} to ${latest}...`,
-    );
-
-    // Check if update is already in progress
-    if (_cliInstallPromise) {
-      return _cliInstallPromise;
-    }
-
-    // Start new update and cache the promise
-    const updatePromise = vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `CodeBrain: Updating CLI ${current} → ${latest}...`,
-        cancellable: false,
-      },
-      () => installCodeBrainCli(token, { uninstallFirst: true }),
-    );
-    _cliInstallPromise = updatePromise;
-
-    const result = await updatePromise;
-    _cliInstallPromise = undefined; // Clear cache after update completes
-    return result;
+  if (_cliBuildPromise) {
+    return _cliBuildPromise;
   }
 
-  return true;
+  const buildPromise = vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "CodeBrain: Preparing CodeGraph...",
+      cancellable: false,
+    },
+    () => installCodeBrainCli(token),
+  );
+  _cliBuildPromise = buildPromise;
+  const result = await buildPromise;
+  _cliBuildPromise = undefined;
+  return result || Boolean(getDevelopmentRuntimeDescriptor([]));
 }
 
-/** Return the first workspace folder root, or process.cwd(). */
 export function getWorkspaceRoot(): string {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
 }

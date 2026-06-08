@@ -1,73 +1,115 @@
-﻿import * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ensureCodeBrainCli } from '../process/prerequisites.js';
 import {
-  runCodeBrain,
   getOutputChannel,
-  getWorkspaceRoot,
   getSetupStateMarkerPath,
-  getInstalledCliPath,
+  getWorkspaceRoot,
 } from '../process/cli-runner.js';
+import {
+  ensureCodeBrainCopilotAgent,
+  type AgentFileResult,
+} from '../process/copilot-agent.js';
 
-/** Full one-shot setup: install/check CLI + run gitnexus setup */
 export async function setupCommand(): Promise<boolean> {
   const channel = getOutputChannel();
   channel.show(true);
 
-  // Step 1 - ensure extension-local CLI (install first time, update later)
   const cliOk = await ensureCodeBrainCli();
   if (!cliOk) {
     return false;
   }
 
-  const workspaceRoot = getWorkspaceRoot();
-
-  const scopePick = await vscode.window.showQuickPick(
-    [
-      {
-        label: 'Global setup',
-        description: 'Configure MCP/skills in your user profile (~)',
-        value: 'global',
-      },
-      {
-        label: 'Current project setup',
-        description: 'Create setup files inside this workspace only',
-        value: 'project',
-      },
-    ],
-    {
-      title: 'CodeBrain Setup Scope',
-      placeHolder: 'Choose where to install setup artifacts',
-      ignoreFocusOut: true,
-    },
-  );
-
-  if (!scopePick) {
-    vscode.window.showInformationMessage('CodeBrain: Setup cancelled.');
-    return false;
-  }
-
-  // Step 2 - run gitnexus setup (it configures MCP/agents by itself)
-  await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'CodeBrain: Running CLI setup', cancellable: false },
-    async () => {
-      await runCodeBrain(
-        ['setup', '--scope', scopePick.value, '--gitnexus-bin', getInstalledCliPath() ?? ''],
-        { cwd: workspaceRoot },
-      );
-    },
-  );
-
   const markerPath = getSetupStateMarkerPath();
   fs.mkdirSync(path.dirname(markerPath), { recursive: true });
   fs.writeFileSync(markerPath, Date.now().toString(), 'utf-8');
 
-  vscode.window.showInformationMessage('CodeBrain: Setup complete.');
+  const agentResult = await ensureWorkspaceAgent(false);
+  if (agentResult) {
+    logAgentResult(channel, agentResult);
+  }
+
+  channel.appendLine('[CodeBrain] CodeGraph is ready. VS Code MCP is provided by this extension.');
+  vscode.window.showInformationMessage(formatSetupMessage(agentResult));
   return true;
 }
 
-/** Just install / verify CLI, no other side effects */
 export async function installCliCommand(): Promise<void> {
   await ensureCodeBrainCli();
+}
+
+export async function createCopilotAgentCommand(): Promise<void> {
+  const channel = getOutputChannel();
+  channel.show(true);
+
+  const result = await ensureWorkspaceAgent(false);
+  if (!result) {
+    return;
+  }
+
+  if (result.action === 'skipped-existing') {
+    const choice = await vscode.window.showWarningMessage(
+      `CodeBrain: ${path.basename(result.filePath)} already exists and has custom content. Overwrite it?`,
+      { modal: true },
+      'Overwrite',
+      'Keep Existing',
+    );
+    if (choice !== 'Overwrite') {
+      logAgentResult(channel, result);
+      return;
+    }
+
+    const overwritten = await ensureWorkspaceAgent(true);
+    if (overwritten) {
+      logAgentResult(channel, overwritten);
+      vscode.window.showInformationMessage(`CodeBrain: Copilot agent updated at ${toWorkspaceRelative(overwritten.filePath)}.`);
+    }
+    return;
+  }
+
+  logAgentResult(channel, result);
+  vscode.window.showInformationMessage(`CodeBrain: Copilot agent ${formatAgentAction(result.action)} at ${toWorkspaceRelative(result.filePath)}.`);
+}
+
+async function ensureWorkspaceAgent(overwrite: boolean): Promise<AgentFileResult | undefined> {
+  if (!vscode.workspace.workspaceFolders?.length) {
+    vscode.window.showWarningMessage('CodeBrain: Open a workspace folder before creating a Copilot agent.');
+    return undefined;
+  }
+
+  return ensureCodeBrainCopilotAgent(getWorkspaceRoot(), { overwrite });
+}
+
+function logAgentResult(channel: vscode.OutputChannel, result: AgentFileResult): void {
+  channel.appendLine(`[CodeBrain] Copilot agent ${formatAgentAction(result.action)}: ${result.filePath}`);
+}
+
+function formatSetupMessage(result: AgentFileResult | undefined): string {
+  if (!result) {
+    return 'CodeBrain: is ready. Open a workspace folder to create the Copilot agent.';
+  }
+
+  if (result.action === 'skipped-existing') {
+    return 'CodeBrain: is ready. Existing CodeBrain agent file was preserved.';
+  }
+
+  return 'CodeBrain: is ready and Copilot agent is configured.';
+}
+
+function formatAgentAction(action: AgentFileResult['action']): string {
+  return {
+    created: 'created',
+    updated: 'updated',
+    unchanged: 'already up to date',
+    'skipped-existing': 'preserved existing custom file',
+  }[action];
+}
+
+function toWorkspaceRelative(filePath: string): string {
+  const relative = path.relative(getWorkspaceRoot(), filePath);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return filePath;
+  }
+  return relative.replace(/\\/g, '/');
 }

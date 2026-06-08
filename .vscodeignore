@@ -3,11 +3,12 @@
 .gitignore
 .gitmodules
 GitNexus/
+codegraph/
 node_modules
+!node_modules/@dqbd/
+!node_modules/@dqbd/tiktoken/**
 !node_modules/@vscode/chat-extension-utils/**
 !node_modules/@vscode/prompt-tsx/**
-runtime/gitnexus/node_modules
-runtime/gitnexus/.runtime-initialized
 out
 *.map
 
@@ -32,7 +33,8 @@ scripts
 # Documentation
 CONTRIBUTING.md
 *.md
-!gitnexus-chat-participant.instructions.md
+!docs/codebrain-v2-workflows.md
+!skills/**
 
 # Hidden files
 .github
@@ -42,7 +44,7 @@ CONTRIBUTING.md
 
 # Root workspace config
 *.sln
-gitnexus-vscode-*.vsix
+codebrain-vscode-*.vsix
 
 # Include explicitly (allowed)
 cli/
