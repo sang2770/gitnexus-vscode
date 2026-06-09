@@ -19,12 +19,15 @@ interface CodeGraphStatusJson {
 
 export class StalenessMonitor implements vscode.Disposable {
   private _timer: NodeJS.Timeout | undefined;
+  private _statusCheckTimer: NodeJS.Timeout | undefined;
   private _disposables: vscode.Disposable[] = [];
   private _autoIndexRunning = false;
 
   constructor(private readonly _statusBar: CodeBrainStatusBar) {}
 
   start(): void {
+    this.stop();
+
     const config = vscode.workspace.getConfiguration('codebrain');
     const intervalSec = config.get<number>('stalenessCheckIntervalSeconds', 0);
 
@@ -44,6 +47,10 @@ export class StalenessMonitor implements vscode.Disposable {
         }
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => void this._check(true)),
+      vscode.workspace.onDidSaveTextDocument((document) => this._scheduleStatusCheck(document.uri)),
+      vscode.workspace.onDidCreateFiles((event) => this._scheduleStatusCheck(event.files[0])),
+      vscode.workspace.onDidDeleteFiles((event) => this._scheduleStatusCheck(event.files[0])),
+      vscode.workspace.onDidRenameFiles((event) => this._scheduleStatusCheck(event.files[0]?.newUri)),
     );
   }
 
@@ -52,6 +59,14 @@ export class StalenessMonitor implements vscode.Disposable {
       clearInterval(this._timer);
       this._timer = undefined;
     }
+
+    if (this._statusCheckTimer) {
+      clearTimeout(this._statusCheckTimer);
+      this._statusCheckTimer = undefined;
+    }
+
+    this._disposables.forEach((disposable) => disposable.dispose());
+    this._disposables = [];
   }
 
   async forceCheck(): Promise<IndexState> {
@@ -104,6 +119,34 @@ export class StalenessMonitor implements vscode.Disposable {
     }
   }
 
+  private _scheduleStatusCheck(uri?: vscode.Uri): void {
+    if (uri && !this._isWorkspaceFile(uri)) {
+      return;
+    }
+
+    if (this._statusCheckTimer) {
+      clearTimeout(this._statusCheckTimer);
+    }
+
+    this._statusCheckTimer = setTimeout(() => {
+      this._statusCheckTimer = undefined;
+      void this._check(false);
+    }, 750);
+  }
+
+  private _isWorkspaceFile(uri: vscode.Uri): boolean {
+    if (uri.scheme !== 'file') {
+      return false;
+    }
+
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+      return true;
+    }
+
+    return folders.some((folder) => uri.fsPath.startsWith(folder.uri.fsPath));
+  }
+
   private async _offerSetup(): Promise<void> {
     if (this._setupOffered) {
       return;
@@ -122,7 +165,6 @@ export class StalenessMonitor implements vscode.Disposable {
 
   dispose(): void {
     this.stop();
-    this._disposables.forEach((disposable) => disposable.dispose());
   }
 }
 

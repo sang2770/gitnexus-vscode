@@ -40,6 +40,12 @@
         "icon": "$(robot)"
       },
       {
+        "command": "codebrain.checkForUpdates",
+        "title": "Check for Extension Updates",
+        "category": "CodeBrain",
+        "icon": "$(cloud-download)"
+      },
+      {
         "command": "codebrain.tokenOptimization.selectMode",
         "title": "Set Token Optimization Mode",
         "category": "CodeBrain",
@@ -170,6 +176,16 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically run first-time CodeGraph setup on workspace open."
+        },
+        "codebrain.updateCheck.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically check GitHub releases for CodeBrain extension updates."
+        },
+        "codebrain.updateCheck.intervalHours": {
+          "type": "number",
+          "default": 24,
+          "description": "Minimum hours between automatic GitHub release update checks."
         },
         "codebrain.autoIndex.onOpen": {
           "type": "boolean",
@@ -380,6 +396,10 @@
   },
   "dependencies": {
     "@dqbd/tiktoken": "^1.0.22",
+    "@sigma/edge-curve": "^3.1.0",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "sigma": "^3.0.3",
     "strip-ansi": "^7.2.0"
   }
 }

@@ -4,12 +4,67 @@ import * as path from 'path';
 import { ensureCodeBrainCli } from '../process/prerequisites.js';
 import { getOutputChannel, getWorkspaceRoot, runCodeBrain } from '../process/cli-runner.js';
 import { getTokenOptimizationSettings } from '../process/token-optimizer.js';
-import { showQueryReport, type QueryResultItem } from '../ui/report-panel.js';
+import {
+  showQueryReport,
+  type QueryReportMetadata,
+  type QueryResultItem,
+  type QueryResultNode,
+  type QueryWorkflowData,
+} from '../ui/report-panel.js';
 
 const MAX_CHANGED_FILES = 200;
 const MAX_REVIEW_SNIPPET_CHARS = 7000;
 const MAX_SELECTION_CHARS = 6000;
 const MAX_REVIEW_SUMMARY_LINES = 24;
+const MAX_WORKFLOW_NODES_PER_SIDE = 60;
+const DEFAULT_GRAPH_QUERY_LIMIT = 20;
+
+interface CallersJson {
+  symbol?: string;
+  callers?: QueryResultNode[];
+}
+
+interface CalleesJson {
+  symbol?: string;
+  callees?: QueryResultNode[];
+}
+
+interface ImpactJson {
+  symbol?: string;
+  depth?: number;
+  nodeCount?: number;
+  edgeCount?: number;
+  affected?: QueryResultNode[];
+}
+
+interface QueryDepthItem extends vscode.QuickPickItem {
+  depth: number;
+}
+
+type QueryPanelRequest =
+  | {
+      mode: 'search';
+      raw: string;
+      search: string;
+      depth?: number;
+      limit?: number;
+      warnings: string[];
+    }
+  | {
+      mode: 'callers' | 'callees';
+      raw: string;
+      symbol: string;
+      limit?: number;
+      warnings: string[];
+    }
+  | {
+      mode: 'impact';
+      raw: string;
+      symbol: string;
+      depth?: number;
+      limit?: number;
+      warnings: string[];
+    };
 
 export async function queryCommand(): Promise<void> {
   const ok = await ensureCodeBrainCli();
@@ -21,7 +76,7 @@ export async function queryCommand(): Promise<void> {
   const selected = editor?.document.getText(editor.selection).trim() ?? '';
 
   const query = await vscode.window.showInputBox({
-    placeHolder: 'e.g. auth token validation flow',
+    placeHolder: 'e.g. auth token validation flow, callers handleRequest',
     prompt: 'CodeBrain: Search CodeGraph',
     value: selected,
   });
@@ -29,30 +84,65 @@ export async function queryCommand(): Promise<void> {
     return;
   }
 
+  const request = parseQueryPanelInput(query);
+  if (!isRunnableQueryRequest(request)) {
+    vscode.window.showWarningMessage('CodeBrain: Enter a search query or a command like "callers handleRequest".');
+    return;
+  }
+
+  if (request.mode === 'search') {
+    const depth = request.depth ?? await pickQueryDepth();
+    if (depth === undefined) {
+      return;
+    }
+    await runSearchQuery(request, depth);
+    return;
+  }
+
+  const depth = request.mode === 'impact' ? request.depth ?? await pickQueryDepth() : 1;
+  if (depth === undefined) {
+    return;
+  }
+
+  await runDirectGraphQuery(request, depth);
+}
+
+async function runSearchQuery(
+  request: Extract<QueryPanelRequest, { mode: 'search' }>,
+  depth: number,
+): Promise<void> {
   const channel = getOutputChannel();
 
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: 'CodeBrain: Querying CodeGraph...',
-      cancellable: false,
+      title: `CodeBrain: Querying CodeGraph (depth ${depth})...`,
+      cancellable: true,
     },
-    async () => {
+    async (_progress, token) => {
       const workspaceRoot = getWorkspaceRoot();
       const tokenSettings = getTokenOptimizationSettings('balanced');
-      const statusResult = await runCodeBrain(['status', workspaceRoot, '--json'], {
-        cwd: workspaceRoot,
-        stream: false,
-      });
-      const result = await runCodeBrain(
-        ['query', query, '--path', workspaceRoot, '--limit', '20', '--json'],
-        { cwd: workspaceRoot, stream: false },
-      );
+      const [statusResult, result] = await Promise.all([
+        runCodeBrain(['status', workspaceRoot, '--json'], {
+          cwd: workspaceRoot,
+          stream: false,
+          token,
+        }),
+        runCodeBrain(
+          ['query', request.search, '--path', workspaceRoot, '--limit', String(request.limit ?? DEFAULT_GRAPH_QUERY_LIMIT), '--json'],
+          { cwd: workspaceRoot, stream: false, token },
+        ),
+      ]);
       const filesScanned = parseStatusFileCount(statusResult.stdout);
 
       channel.appendLine(result.stdout.trim());
       if (result.stderr.trim()) {
         channel.appendLine(result.stderr.trim());
+      }
+
+      if (token.isCancellationRequested) {
+        vscode.window.showWarningMessage('CodeBrain: Query cancelled.');
+        return;
       }
 
       if (result.exitCode !== 0) {
@@ -65,17 +155,498 @@ export async function queryCommand(): Promise<void> {
         const optimized = tokenSettings.enabled
           ? parsed.slice(0, tokenSettings.queryResultLimit)
           : parsed;
-        showQueryReport(query, optimized, result.stdout, {
+        const metadata: QueryReportMetadata = {
           allResultCount: parsed.length,
           filesScanned,
-        });
-        vscode.window.showInformationMessage(`CodeBrain: Showing ${optimized.length} of ${parsed.length} result${parsed.length === 1 ? '' : 's'} (${tokenSettings.configuredMode} token mode).`);
+          workflow: await buildQueryWorkflowData(parsed, depth, workspaceRoot, token, request.warnings),
+        };
+
+        if (token.isCancellationRequested) {
+          vscode.window.showWarningMessage('CodeBrain: Query cancelled.');
+          return;
+        }
+
+        showQueryReport(request.raw, optimized, result.stdout, metadata);
+        const workflowNote = metadata.workflow ? ` Workflow: ${metadata.workflow.symbol}, depth ${metadata.workflow.depth}.` : '';
+        vscode.window.showInformationMessage(`CodeBrain: Showing ${optimized.length} of ${parsed.length} result${parsed.length === 1 ? '' : 's'} (${tokenSettings.configuredMode} token mode).${workflowNote}`);
       } catch {
-        showQueryReport(query, [], result.stdout || result.stderr);
+        showQueryReport(request.raw, [], result.stdout || result.stderr);
         vscode.window.showWarningMessage('CodeBrain: Query returned non-JSON output. Showing raw output.');
       }
     },
   );
+}
+
+async function runDirectGraphQuery(
+  request: Exclude<QueryPanelRequest, { mode: 'search' }>,
+  depth: number,
+): Promise<void> {
+  const channel = getOutputChannel();
+  const title = formatGraphRequestTitle(request, depth);
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `CodeBrain: Running ${title}...`,
+      cancellable: true,
+    },
+    async (_progress, token) => {
+      const workspaceRoot = getWorkspaceRoot();
+      const tokenSettings = getTokenOptimizationSettings('balanced');
+      const [statusResult, result, targetResult] = await Promise.all([
+        runCodeBrain(['status', workspaceRoot, '--json'], {
+          cwd: workspaceRoot,
+          stream: false,
+          token,
+        }),
+        runCodeBrain(buildDirectGraphArgs(request, workspaceRoot, depth), {
+          cwd: workspaceRoot,
+          stream: false,
+          token,
+        }),
+        runCodeBrain(['query', request.symbol, '--path', workspaceRoot, '--limit', '5', '--json'], {
+          cwd: workspaceRoot,
+          stream: false,
+          token,
+        }),
+      ]);
+      const filesScanned = parseStatusFileCount(statusResult.stdout);
+
+      channel.appendLine(result.stdout.trim());
+      if (result.stderr.trim()) {
+        channel.appendLine(result.stderr.trim());
+      }
+
+      if (token.isCancellationRequested) {
+        vscode.window.showWarningMessage('CodeBrain: Query cancelled.');
+        return;
+      }
+
+      if (result.exitCode !== 0) {
+        vscode.window.showErrorMessage('CodeBrain: Query failed. Check Output panel.');
+        return;
+      }
+
+      const warnings = [...request.warnings];
+      try {
+        const metadata = buildDirectGraphMetadata(request, depth, result, targetResult, warnings);
+        const resultNodes = directResultNodes(metadata.workflow);
+        const optimized = tokenSettings.enabled
+          ? resultNodes.slice(0, tokenSettings.queryResultLimit)
+          : resultNodes;
+
+        showQueryReport(request.raw, optimized, result.stdout, {
+          allResultCount: resultNodes.length,
+          filesScanned,
+          workflow: metadata.workflow,
+        });
+
+        vscode.window.showInformationMessage(
+          `CodeBrain: ${title} returned ${resultNodes.length} result${resultNodes.length === 1 ? '' : 's'} (${tokenSettings.configuredMode} token mode).`,
+        );
+      } catch {
+        showQueryReport(request.raw, [], result.stdout || result.stderr);
+        vscode.window.showWarningMessage('CodeBrain: Query returned non-JSON output. Showing raw output.');
+      }
+    },
+  );
+}
+
+function buildDirectGraphArgs(
+  request: Exclude<QueryPanelRequest, { mode: 'search' }>,
+  workspaceRoot: string,
+  depth: number,
+): string[] {
+  const limit = String(request.limit ?? DEFAULT_GRAPH_QUERY_LIMIT);
+  switch (request.mode) {
+    case 'callers':
+      return ['callers', request.symbol, '--path', workspaceRoot, '--limit', limit, '--json'];
+    case 'callees':
+      return ['callees', request.symbol, '--path', workspaceRoot, '--limit', limit, '--json'];
+    case 'impact':
+      return ['impact', request.symbol, '--path', workspaceRoot, '--depth', String(depth), '--json'];
+    default:
+      return [];
+  }
+}
+
+function buildDirectGraphMetadata(
+  request: Exclude<QueryPanelRequest, { mode: 'search' }>,
+  depth: number,
+  result: { stdout: string; stderr: string; exitCode: number },
+  targetResult: { stdout: string; stderr: string; exitCode: number },
+  warnings: string[],
+): { workflow: QueryWorkflowData } {
+  const targetItems = parseGraphJson<QueryResultItem[]>(targetResult, 'Target lookup', warnings);
+  const target = pickWorkflowTarget(targetItems ?? [])?.node ?? {
+    name: request.symbol,
+    qualifiedName: request.symbol,
+  };
+
+  switch (request.mode) {
+    case 'callers': {
+      const parsed = JSON.parse(result.stdout) as CallersJson;
+      return {
+        workflow: {
+          symbol: request.symbol,
+          depth: 1,
+          target,
+          callers: uniqueNodes(parsed.callers ?? []),
+          callees: [],
+          affected: [],
+          warnings,
+        },
+      };
+    }
+    case 'callees': {
+      const parsed = JSON.parse(result.stdout) as CalleesJson;
+      return {
+        workflow: {
+          symbol: request.symbol,
+          depth: 1,
+          target,
+          callers: [],
+          callees: uniqueNodes(parsed.callees ?? []),
+          affected: [],
+          warnings,
+        },
+      };
+    }
+    case 'impact': {
+      const parsed = JSON.parse(result.stdout) as ImpactJson;
+      return {
+        workflow: {
+          symbol: request.symbol,
+          depth,
+          target,
+          callers: [],
+          callees: [],
+          affected: uniqueNodes(parsed.affected ?? []),
+          edgeCount: parsed.edgeCount,
+          warnings,
+        },
+      };
+    }
+    default:
+      throw new Error('Unsupported graph request.');
+  }
+}
+
+function directResultNodes(workflow: QueryWorkflowData): QueryResultItem[] {
+  const nodes = [
+    ...workflow.callers,
+    ...workflow.callees,
+    ...workflow.affected,
+  ];
+  return uniqueNodes(nodes).map((node) => ({ node }));
+}
+
+function parseQueryPanelInput(input: string): QueryPanelRequest {
+  const raw = input.trim();
+  const tokens = tokenizePanelInput(raw);
+  const warnings: string[] = [];
+  const firstToken = tokens[0]?.toLowerCase();
+  const commandIndex = firstToken === 'codegraph' ? 1 : 0;
+  const command = tokens[commandIndex]?.toLowerCase();
+
+  if (command !== 'query' && command !== 'callers' && command !== 'callees' && command !== 'impact') {
+    return {
+      mode: 'search',
+      raw,
+      search: raw,
+      warnings,
+    };
+  }
+
+  const parsedArgs = parsePanelCommandArgs(tokens.slice(commandIndex + 1), warnings);
+  const phrase = unwrapSymbolPlaceholder(parsedArgs.positionals.join(' ').trim());
+  if (command === 'query') {
+    return {
+      mode: 'search',
+      raw,
+      search: phrase,
+      depth: parsedArgs.depth,
+      limit: parsedArgs.limit,
+      warnings,
+    };
+  }
+
+  if (command === 'impact') {
+    return {
+      mode: 'impact',
+      raw,
+      symbol: phrase,
+      depth: parsedArgs.depth,
+      limit: parsedArgs.limit,
+      warnings,
+    };
+  }
+
+  return {
+    mode: command,
+    raw,
+    symbol: phrase,
+    limit: parsedArgs.limit,
+    warnings,
+  };
+}
+
+function tokenizePanelInput(input: string): string[] {
+  return input.match(/"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|[^\s]+/gu)?.map((token) => {
+    if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+      return token.slice(1, -1);
+    }
+    return token;
+  }) ?? [];
+}
+
+function parsePanelCommandArgs(
+  tokens: string[],
+  warnings: string[],
+): {
+  positionals: string[];
+  depth?: number;
+  limit?: number;
+} {
+  const positionals: string[] = [];
+  let depth: number | undefined;
+  let limit: number | undefined;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index] ?? '';
+    const lower = token.toLowerCase();
+
+    if (lower === '--json' || lower === '-j') {
+      continue;
+    }
+
+    if (lower === '--path' || lower === '-p') {
+      index += 1;
+      continue;
+    }
+
+    if (lower === '--depth' || lower === '-d') {
+      const parsed = parsePositiveInteger(tokens[index + 1]);
+      if (parsed !== undefined) {
+        depth = parsed;
+        index += 1;
+      } else {
+        warnings.push('Ignored invalid --depth value.');
+      }
+      continue;
+    }
+
+    if (lower === '--limit' || lower === '-l') {
+      const parsed = parsePositiveInteger(tokens[index + 1]);
+      if (parsed !== undefined) {
+        limit = parsed;
+        index += 1;
+      } else {
+        warnings.push('Ignored invalid --limit value.');
+      }
+      continue;
+    }
+
+    if (lower === '--deep') {
+      warnings.push('Ignored unsupported --deep flag; CodeGraph uses "callers <symbol>" for direct callers and "impact <symbol> --depth <n>" for traversal.');
+      continue;
+    }
+
+    if (token.startsWith('-')) {
+      warnings.push(`Ignored unsupported option ${token}.`);
+      continue;
+    }
+
+    positionals.push(token);
+  }
+
+  return { positionals, depth, limit };
+}
+
+function parsePositiveInteger(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function unwrapSymbolPlaceholder(value: string): string {
+  if (value.startsWith('<') && value.endsWith('>') && value.length > 2) {
+    return value.slice(1, -1).trim();
+  }
+  return value;
+}
+
+function isRunnableQueryRequest(request: QueryPanelRequest): boolean {
+  if (request.mode === 'search') {
+    return request.search.length > 0;
+  }
+
+  return request.symbol.length > 0;
+}
+
+function formatGraphRequestTitle(
+  request: Exclude<QueryPanelRequest, { mode: 'search' }>,
+  depth: number,
+): string {
+  switch (request.mode) {
+    case 'callers':
+      return `callers for ${request.symbol}`;
+    case 'callees':
+      return `callees for ${request.symbol}`;
+    case 'impact':
+      return `impact for ${request.symbol} (depth ${depth})`;
+    default:
+      return 'CodeGraph query';
+  }
+}
+
+async function pickQueryDepth(): Promise<number | undefined> {
+  const items: QueryDepthItem[] = [
+    {
+      label: 'Depth 2',
+      description: 'Recommended',
+      detail: 'Direct callers/callees plus a broader impact neighborhood.',
+      depth: 2,
+      picked: true,
+    },
+    {
+      label: 'Depth 1',
+      description: 'Fast',
+      detail: 'Direct callers, direct callees, and immediate impact.',
+      depth: 1,
+    },
+    {
+      label: 'Depth 3',
+      description: 'Broader',
+      detail: 'Useful when the function sits in a multi-step workflow.',
+      depth: 3,
+    },
+    {
+      label: 'Depth 4',
+      description: 'Deep',
+      detail: 'More transitive symbols; can take longer on large repositories.',
+      depth: 4,
+    },
+  ];
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: 'CodeBrain Query Depth',
+    placeHolder: 'Choose how far CodeGraph should traverse from the queried function',
+  });
+
+  return picked?.depth;
+}
+
+async function buildQueryWorkflowData(
+  results: QueryResultItem[],
+  depth: number,
+  workspaceRoot: string,
+  token: vscode.CancellationToken,
+  inputWarnings: string[] = [],
+): Promise<QueryWorkflowData | undefined> {
+  const target = pickWorkflowTarget(results)?.node;
+  const symbol = workflowSymbol(target);
+  if (!symbol) {
+    return undefined;
+  }
+
+  const limit = String(Math.min(MAX_WORKFLOW_NODES_PER_SIDE, Math.max(12, depth * 16)));
+  const warnings: string[] = [...inputWarnings];
+  const [callersResult, calleesResult, impactResult] = await Promise.all([
+    runCodeBrain(['callers', symbol, '--path', workspaceRoot, '--limit', limit, '--json'], {
+      cwd: workspaceRoot,
+      stream: false,
+      token,
+    }),
+    runCodeBrain(['callees', symbol, '--path', workspaceRoot, '--limit', limit, '--json'], {
+      cwd: workspaceRoot,
+      stream: false,
+      token,
+    }),
+    runCodeBrain(['impact', symbol, '--path', workspaceRoot, '--depth', String(depth), '--json'], {
+      cwd: workspaceRoot,
+      stream: false,
+      token,
+    }),
+  ]);
+
+  const callers = parseGraphJson<CallersJson>(callersResult, 'Callers', warnings);
+  const callees = parseGraphJson<CalleesJson>(calleesResult, 'Callees', warnings);
+  const impact = parseGraphJson<ImpactJson>(impactResult, 'Impact', warnings);
+
+  return {
+    symbol,
+    depth,
+    target,
+    callers: uniqueNodes(callers?.callers ?? []),
+    callees: uniqueNodes(callees?.callees ?? []),
+    affected: uniqueNodes(impact?.affected ?? []),
+    edgeCount: impact?.edgeCount,
+    warnings,
+  };
+}
+
+function workflowSymbol(node: QueryResultNode | undefined): string | undefined {
+  return node?.qualifiedName?.trim() || node?.name?.trim();
+}
+
+function pickWorkflowTarget(results: QueryResultItem[]): QueryResultItem | undefined {
+  const withName = results.filter((result) => result.node?.name);
+  return (
+    withName.find((result) => result.node?.kind === 'class' || result.node?.kind === 'component' || result.node?.kind === 'route') ??
+    withName.find((result) => result.node?.kind === 'function' || result.node?.kind === 'method') ??
+    withName[0]
+  );
+}
+
+function parseGraphJson<T>(
+  result: { stdout: string; stderr: string; exitCode: number },
+  label: string,
+  warnings: string[],
+): T | undefined {
+  if (result.exitCode !== 0) {
+    warnings.push(`${label}: ${summarizeCliOutput(result.stderr || result.stdout) || 'command failed'}.`);
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(result.stdout) as T;
+  } catch {
+    const summary = summarizeCliOutput(result.stdout || result.stderr);
+    if (summary) {
+      warnings.push(`${label}: ${summary}.`);
+    }
+    return undefined;
+  }
+}
+
+function uniqueNodes(nodes: QueryResultNode[]): QueryResultNode[] {
+  const seen = new Set<string>();
+  const uniqueNodes: QueryResultNode[] = [];
+
+  for (const node of nodes) {
+    const key = `${node.name ?? ''}|${node.kind ?? ''}|${node.filePath ?? ''}|${node.startLine ?? ''}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    uniqueNodes.push(node);
+  }
+
+  return uniqueNodes;
+}
+
+function summarizeCliOutput(text: string): string {
+  return text
+    .replace(/\u001b\[[0-9;]*m/gu, '')
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' ');
 }
 
 function parseStatusFileCount(stdout: string): number | undefined {

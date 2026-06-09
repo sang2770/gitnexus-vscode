@@ -90,6 +90,11 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
         command: 'codebrain.createCopilotAgent',
       },
       {
+        label: 'Check for Updates',
+        description: 'Check GitHub releases for a newer CodeBrain VSIX',
+        command: 'codebrain.checkForUpdates',
+      },
+      {
         label: 'Analyze Workspace',
         description: 'Initialize or sync the CodeGraph index',
         command: 'codebrain.analyze',

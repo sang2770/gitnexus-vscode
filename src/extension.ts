@@ -15,8 +15,13 @@ import {
   initializeCodeBrainRuntime,
 } from './process/cli-runner.js';
 import { registerCodeGraphMcpProvider } from './process/mcp-provider.js';
+import {
+  checkForExtensionUpdates,
+  checkForExtensionUpdatesCommand,
+} from './process/update-checker.js';
 import { StalenessMonitor } from './staleness/staleness-monitor.js';
 import { createCodeGraphParticipant } from './ui/chat-participant.js';
+import { configureReportPanel } from './ui/report-panel.js';
 import {
   askCodeBrainAboutImpactTarget,
   ImpactLensTreeProvider,
@@ -29,6 +34,7 @@ import { AgentsTreeProvider, QuickActionsTreeProvider } from './ui/tree-view.js'
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = getOutputChannel();
   initializeCodeBrainRuntime(context.globalStorageUri.fsPath);
+  configureReportPanel(context.extensionUri);
 
   context.subscriptions.push(registerCodeGraphMcpProvider(context));
   const statusBar = new CodeBrainStatusBar();
@@ -38,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
   setTimeout(() => {
     staleness = new StalenessMonitor(statusBar);
     staleness.start();
+    console.log("Hello");
     context.subscriptions.push(staleness);
   }, 1000);
 
@@ -77,6 +84,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ],
     ['codebrain.installCli', installCliCommand],
     ['codebrain.createCopilotAgent', createCopilotAgentCommand],
+    ['codebrain.checkForUpdates', () => checkForExtensionUpdatesCommand(context)],
     ['codebrain.tokenOptimization.selectMode', selectTokenOptimizationModeCommand],
     ['codebrain.analyze', () => runAnalyzeWithStatus()],
     ['codebrain.analyzeForce', () => runAnalyzeWithStatus({ force: true })],
@@ -93,7 +101,15 @@ export function activate(context: vscode.ExtensionContext): void {
         }
       },
     ],
-    ['codebrain.status', statusCommand],
+    [
+      'codebrain.status',
+      async () => {
+        await statusCommand();
+        if (staleness) {
+          await staleness.forceCheck();
+        }
+      },
+    ],
     ['codebrain.clean', cleanCommand],
     ['codebrain.query', queryCommand],
     ['codebrain.prReview', prReviewCommand],
@@ -136,6 +152,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   void runStartupHealthCheck();
+  void checkForExtensionUpdates(context);
 }
 
 export function deactivate(): void {}

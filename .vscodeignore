@@ -7,8 +7,15 @@ codegraph/
 node_modules
 !node_modules/@dqbd/
 !node_modules/@dqbd/tiktoken/**
+!node_modules/@sigma/
+!node_modules/@sigma/edge-curve/**
 !node_modules/@vscode/chat-extension-utils/**
 !node_modules/@vscode/prompt-tsx/**
+!node_modules/events/**
+!node_modules/graphology/**
+!node_modules/graphology-layout-forceatlas2/**
+!node_modules/graphology-utils/**
+!node_modules/sigma/**
 out
 *.map
 
