@@ -60,9 +60,9 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
         command: 'codebrain.workflow.detectChange',
       },
       {
-        label: 'Generate Fix Plan',
-        description: 'Create a Copilot Agent task grounded in graph evidence',
-        command: 'codebrain.workflow.fixPlan',
+        label: 'Generate Plan',
+        description: 'Create a Copilot Agent task grounded in graph plus optional Atlassian context',
+        command: 'codebrain.workflow.plan',
       },
       {
         label: 'Generate Test Plan',

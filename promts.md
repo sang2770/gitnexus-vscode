@@ -180,7 +180,7 @@ What would you like to do?
 * Explain Flow
 * Analyze Impact
 * Review Changes
-* Generate Fix Plan
+* Generate Plan
 * Debug Issue
 
 ---
@@ -237,7 +237,7 @@ Use for:
 
 * impact
 * review
-* fix_plan
+* plan
 
 ## Full Mode
 
@@ -347,7 +347,7 @@ Developer Intent
 → CodeGraph Retrieval
 → Context Optimization
 → Copilot Reasoning
-→ Fix Plan
+→ Plan
 → Run with Copilot Agent
 
 Generated Agent Tasks should include:
@@ -371,7 +371,7 @@ Design the following commands:
 * /review
 * /test
 * /detect_change
-* /fix_plan
+* /plan
 
 For each command specify:
 
@@ -423,7 +423,7 @@ Flow:
 1. Developer modifies AuthService
 2. CodeBrain reviews changes
 3. CodeBrain analyzes impact
-4. CodeBrain generates fix plan
+4. CodeBrain generates plan
 5. Copilot Agent executes plan
 
 Provide:

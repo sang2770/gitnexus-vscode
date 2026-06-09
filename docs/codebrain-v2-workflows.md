@@ -27,7 +27,7 @@ Developer intent
 | `/review` | Slash command, SCM command, diff keywords | `codegraph_status`, `codegraph_explore`, `codegraph_impact` | status -> changed-area explore -> optional impact | Balanced | findings first, risk, coverage note |
 | `/test` | Slash command, test/coverage keywords, selected target | `codegraph_explore`, `codegraph_impact`, `codegraph_files` | explore behavior/tests -> optional impact -> optional files | Balanced | test targets, cases, validation |
 | `/detect_change` | Slash command, SCM context, change keywords | `codegraph_status`, `codegraph_explore`, `codegraph_impact` | status -> changed-area explore -> optional impact | Balanced | changed scope, impact, validation |
-| `/fix_plan` | Slash command, task/debug/refactor keywords, selected target | `codegraph_explore`, `codegraph_impact`, `codegraph_node` | explore -> impact -> optional node | Balanced | fix plan and Copilot Agent task |
+| `/plan` | Slash command, Jira/collab references, task/debug/refactor keywords, selected target | `codegraph_explore`, `codegraph_impact`, `codegraph_node`, optional Atlassian/Jira/Confluence tools | explore -> impact -> optional Jira/collab context -> optional node | Balanced | implementation plan and Copilot Agent task |
 
 ## Mandatory Explainability
 
@@ -51,9 +51,9 @@ If CodeGraph output does not expose a metric, the response must use `Unknown` an
 
 ### Feature Implementation
 
-1. User asks `@CodeBrain /fix_plan implement session timeout`.
-2. CodeBrain explores relevant flows and runs impact analysis.
-3. CodeBrain returns a Copilot Agent task with files, constraints, risks, tests, and validation steps.
+1. User asks `@CodeBrain /plan implement session timeout from ABC-123`.
+2. CodeBrain explores relevant flows, runs impact analysis, and pulls available Jira/collab context through MCP Atlassian.
+3. CodeBrain returns a Copilot Agent task with requirements, files, constraints, risks, tests, and validation steps.
 
 ### Impact Analysis
 
@@ -69,8 +69,8 @@ If CodeGraph output does not expose a metric, the response must use `Unknown` an
 
 ### Generate Implementation Plans
 
-1. User asks `@CodeBrain /fix_plan <task>`.
-2. CodeBrain retrieves graph context and impact.
+1. User asks `@CodeBrain /plan <task, issue, or collab doc>`.
+2. CodeBrain retrieves graph context, impact, and available Jira/collab context.
 3. Output is an Agent-ready task, not direct file edits.
 
 ### Generate Test Plans
@@ -87,7 +87,7 @@ If CodeGraph output does not expose a metric, the response must use `Unknown` an
 2. Modify `AuthService.login`.
 3. Run `CodeBrain: Workflow: Review Changes`.
 4. Ask `@CodeBrain /impact AuthService.login`.
-5. Ask `@CodeBrain /fix_plan update callers for the AuthService.login change`.
+5. Ask `@CodeBrain /plan update callers for the AuthService.login change`.
 6. Run the generated Copilot Agent task.
 
 ### Expected Review Output

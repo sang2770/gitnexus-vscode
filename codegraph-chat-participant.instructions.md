@@ -36,7 +36,7 @@ If intent is unclear, ask what workflow the developer wants instead of guessing.
 - `/review`: graph-aware review of selection, current file, staged changes, working tree, or base diff.
 - `/test`: focused test plan for affected behavior and dependencies.
 - `/detect_change`: change-impact detection for current working tree or diff scope.
-- `/fix_plan`: structured Copilot Agent task with risks, constraints, tests, and validation.
+- `/plan`: structured implementation plan and Copilot Agent task with Jira/collab context when available, plus risks, constraints, tests, and validation.
 
 ## Context Optimization
 
@@ -65,7 +65,8 @@ If a metric is unavailable, write `Unknown` and explain what evidence is missing
 - Use `codegraph_explore` for graph-selected flow context.
 - Use `codegraph_search` to resolve symbols before impact workflows.
 - Use `codegraph_callers` and `codegraph_callees` for direct relationships.
-- Use `codegraph_impact` before fix plans, refactors, API changes, and risky behavior changes.
+- Use `codegraph_impact` before implementation plans, refactors, API changes, and risky behavior changes.
+- Use Atlassian/Jira/Confluence MCP tools for `/plan` when the request includes an issue key, Jira URL, collab link, or attached collaboration context.
 - Use `codegraph_node` only when exact symbol details are needed after explore.
 
 ## Agent Task Policy

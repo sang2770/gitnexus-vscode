@@ -52,6 +52,11 @@ export class CodeGraphAgentParticipant {
 
   private buildInstructions(intent: WorkflowIntent): string {
     const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
+    const definition = WORKFLOW_DEFINITIONS[intent.workflow];
+    const supplementalHints = definition.supplementalMcpToolHints ?? [];
+    const toolScope = supplementalHints.length > 0
+      ? `Use the selected CodeGraph MCP tools plus matching supplemental MCP context tools for this workflow. Supplemental hints: ${supplementalHints.join(', ')}.`
+      : 'Use only the CodeGraph MCP tools selected for this workflow unless a later tool result proves a narrower follow-up is necessary.';
     return [
       buildWorkflowInstructions(intent),
       '',
@@ -62,7 +67,7 @@ export class CodeGraphAgentParticipant {
       `- Target budget: ${tokenSettings.tokenBudget} tokens`,
       '',
       `Workspace path: ${getWorkspaceRoot()}`,
-      'Use only the CodeGraph MCP tools selected for this workflow unless a later tool result proves a narrower follow-up is necessary.',
+      toolScope,
     ].join('\n');
   }
 
@@ -77,6 +82,11 @@ export class CodeGraphAgentParticipant {
   private isCodeGraphTool(tool: vscode.LanguageModelToolInformation): boolean {
     const haystack = this.getToolSearchText(tool).toLowerCase();
     return CODEGRAPH_TOOL_HINTS.some((hint) => haystack.includes(hint));
+  }
+
+  private toolMatchesAnyHint(tool: vscode.LanguageModelToolInformation, hints: string[]): boolean {
+    const haystack = this.getToolSearchText(tool).toLowerCase();
+    return hints.some((hint) => haystack.includes(hint));
   }
 
   private isCodeBrainTool(tool: vscode.LanguageModelToolInformation): boolean {
@@ -107,7 +117,8 @@ export class CodeGraphAgentParticipant {
   }
 
   private selectToolsForIntent(intent: WorkflowIntent): vscode.LanguageModelToolInformation[] {
-    const allowedKinds = WORKFLOW_DEFINITIONS[intent.workflow].mcpToolsRequired;
+    const definition = WORKFLOW_DEFINITIONS[intent.workflow];
+    const allowedKinds = definition.mcpToolsRequired;
     const selected = vscode.lm.tools.filter((tool) => {
       if (!this.isCodeGraphTool(tool) || this.isCodeBrainTool(tool)) {
         return false;
@@ -116,7 +127,12 @@ export class CodeGraphAgentParticipant {
     });
 
     const fallbackCodeGraphTools = vscode.lm.tools.filter((tool) => this.isCodeGraphTool(tool));
-    return this.dedupeTools(selected.length > 0 ? selected : fallbackCodeGraphTools).slice(0, 12);
+    const supplementalTools = vscode.lm.tools.filter((tool) => {
+      const hints = definition.supplementalMcpToolHints ?? [];
+      return hints.length > 0 && !this.isCodeBrainTool(tool) && this.toolMatchesAnyHint(tool, hints);
+    });
+    const codeGraphTools = selected.length > 0 ? selected : fallbackCodeGraphTools;
+    return this.dedupeTools([...codeGraphTools, ...supplementalTools]).slice(0, 12);
   }
 
   private dedupeTools(tools: vscode.LanguageModelToolInformation[]): vscode.LanguageModelToolInformation[] {
@@ -290,7 +306,7 @@ export class CodeGraphAgentParticipant {
       const response = await model.sendRequest(
         messages,
         {
-          justification: `CodeBrain v2 workflow: /${intent.workflow}`,
+          justification: `CodeBrain v2 workflow: ${WORKFLOW_DEFINITIONS[intent.workflow].slashCommand}`,
           tools: toolSelection.tools,
           toolMode: toolSelection.toolMode,
         },
@@ -324,7 +340,7 @@ export class CodeGraphAgentParticipant {
 
     messages.push(
       vscode.LanguageModelChatMessage.User(
-        'Tool-call budget reached. Use the CodeGraph tool results above to answer now. Include the mandatory CodeBrain v2 context and token-reduction sections. Do not request additional tool calls.',
+        'Tool-call budget reached. Use the MCP tool results above to answer now. Include the mandatory CodeBrain v2 context and token-reduction sections. Do not request additional tool calls.',
       ),
     );
     const finalResponse = await model.sendRequest(messages, {
@@ -355,7 +371,7 @@ export class CodeGraphAgentParticipant {
       '`@CodeBrain /impact UserService.authenticate`',
       '`@CodeBrain /review`',
       '`@CodeBrain /test AuthService.login`',
-      '`@CodeBrain /fix_plan implement checkout timeout fix`',
+      '`@CodeBrain /plan ABC-123 implement checkout timeout fix from the linked collab doc`',
     ];
 
     stream.markdown(['Tell CodeBrain what code, symbol, flow, or problem to work on.', '', 'Examples:', ...examples.map((example) => `- ${example}`)].join('\n'));
@@ -375,7 +391,7 @@ export class CodeGraphAgentParticipant {
     stream.button({ command: 'codebrain.workflow.explain', title: 'Explain Flow' });
     stream.button({ command: 'codebrain.workflow.impact', title: 'Analyze Impact' });
     stream.button({ command: 'codebrain.workflow.review', title: 'Review Changes' });
-    stream.button({ command: 'codebrain.workflow.fixPlan', title: 'Generate Fix Plan' });
+    stream.button({ command: 'codebrain.workflow.plan', title: 'Generate Plan' });
     stream.button({ command: 'codebrain.workflow.test', title: 'Generate Test Plan' });
     return { metadata: { handledBy: 'intentClarification', intent } };
   }
@@ -423,7 +439,7 @@ export class CodeGraphAgentParticipant {
             '',
             `Reason: ${message}`,
             '',
-            'Check the CodeBrain output channel, then verify CodeGraph MCP tools are available.',
+            'Check the CodeBrain output channel, then verify the selected MCP tools are available.',
           ].join('\n'),
         );
         return { errorDetails: { message } };
@@ -437,7 +453,7 @@ export class CodeGraphAgentParticipant {
         { prompt: '/architecture current workspace', label: 'Explain architecture' },
         { prompt: '/impact selected symbol', label: 'Analyze impact' },
         { prompt: '/review', label: 'Review changes' },
-        { prompt: '/fix_plan selected symbol', label: 'Generate fix plan' },
+        { prompt: '/plan selected symbol', label: 'Generate plan' },
       ],
     };
   }

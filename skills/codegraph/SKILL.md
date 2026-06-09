@@ -25,12 +25,12 @@ Developer intent -> workflow resolution -> CodeGraph retrieval -> context optimi
 - `/review`: review selected/current/diff changes with graph-aware context.
 - `/test`: generate a focused test plan from affected behavior and dependencies.
 - `/detect_change`: map working-tree changes to affected flows, risks, and validation scope.
-- `/fix_plan`: produce a structured Copilot Agent task, including files, constraints, risks, tests, and validation.
+- `/plan`: produce a structured implementation plan and Copilot Agent task, including Jira/collab context when available, files, constraints, risks, tests, and validation.
 
 ## Context Modes
 
 - Compact: current symbol and direct references. Use for quick explanation.
-- Balanced: symbol, callers, callees, dependencies, and related tests. Use for impact, review, test, detect_change, and fix_plan.
+- Balanced: symbol, callers, callees, dependencies, and related tests. Use for impact, review, test, detect_change, and plan.
 - Full: broader dependency graph, module relationships, and architecture clusters. Use for architecture and large refactors.
 
 ## Mandatory Response Sections

@@ -8,7 +8,7 @@ export type CodeBrainWorkflowKind =
   | 'review'
   | 'test'
   | 'detect_change'
-  | 'fix_plan';
+  | 'plan';
 
 export type ContextMode = 'compact' | 'balanced' | 'full';
 
@@ -72,7 +72,9 @@ export interface WorkflowDefinition {
   contextMode: ContextMode;
   intentParsingStrategy: string;
   mcpToolsRequired: CodeGraphToolKind[];
+  supplementalMcpToolHints?: string[];
   graphQueryPlan: string[];
+  supplementalContextPlan?: string[];
   contextOptimizationStrategy: string;
   promptConstructionStrategy: string;
   outputSchema: string[];
@@ -98,11 +100,11 @@ const WORKFLOW_ALIASES: Record<string, CodeBrainWorkflowKind> = {
   detect_change: 'detect_change',
   detect_changes: 'detect_change',
   changes: 'detect_change',
-  fix_plan: 'fix_plan',
-  plan: 'fix_plan',
-  implementation_plan: 'fix_plan',
-  refactor: 'fix_plan',
-  debug: 'fix_plan',
+  fix_plan: 'plan',
+  plan: 'plan',
+  implementation_plan: 'plan',
+  refactor: 'plan',
+  debug: 'plan',
 };
 
 export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinition> = {
@@ -331,36 +333,42 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     ],
     producesAgentTask: false,
   },
-  fix_plan: {
-    kind: 'fix_plan',
-    slashCommand: '/fix_plan',
-    label: 'Fix Plan',
+  plan: {
+    kind: 'plan',
+    slashCommand: '/plan',
+    label: 'Plan',
     contextMode: 'balanced',
     intentParsingStrategy:
-      'Slash command, selected symbol, implementation-plan keywords, or issue/debug/refactor wording.',
+      'Slash command, selected symbol, Jira/collab references, implementation-plan keywords, or issue/debug/refactor wording.',
     mcpToolsRequired: ['explore', 'impact', 'node'],
+    supplementalMcpToolHints: ['atlassian', 'jira', 'confluence', 'collab'],
     graphQueryPlan: [
       'codegraph_explore: retrieve relevant flow and constraints.',
       'codegraph_impact: inspect blast radius before proposing edits.',
       'codegraph_node: fetch exact symbol details only if needed for a precise plan.',
     ],
+    supplementalContextPlan: [
+      'mcp-atlassian (optional): pull Jira issue fields, acceptance criteria, linked tickets, and collaboration/Confluence document context when the request includes an issue key, Jira URL, collab link, or attached Atlassian tools.',
+      'Merge external product requirements with CodeGraph evidence; call out any Jira/doc context that was unavailable instead of inventing it.',
+    ],
     contextOptimizationStrategy:
-      'Balanced mode: target behavior, direct dependencies, risky dependents, and likely tests.',
+      'Balanced mode: target behavior, external requirements, direct dependencies, risky dependents, and likely tests.',
     promptConstructionStrategy:
-      'Generate a structured Copilot Agent task with edit files, constraints, risks, tests, and validation steps.',
+      'Generate a plan first, combining CodeGraph evidence with Jira/collab requirements when available, then produce a structured Copilot Agent task with edit files, constraints, risks, tests, and validation steps.',
     outputSchema: [
       'Context Used',
+      'External Context Used',
       'Why Selected',
       'Token Reduction',
       'Findings',
-      'Fix Plan',
+      'Plan',
       'Copilot Agent Task',
       'Validation Steps',
       'Self-check',
     ],
     exampleConversation: [
-      'User: @CodeBrain /fix_plan add auth token rotation',
-      'CodeBrain: explores auth flows, checks impact, then produces a task Copilot Agent can execute.',
+      'User: @CodeBrain /plan ABC-123 add auth token rotation using the linked collab design',
+      'CodeBrain: explores auth flows, checks impact, pulls available Jira/collab context, then produces a task Copilot Agent can execute.',
     ],
     toolPlan: [
       { toolKind: 'explore', purpose: 'Retrieve implementation context and constraints.', required: true },
@@ -459,9 +467,19 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
     '',
     `Context optimization strategy: ${definition.contextOptimizationStrategy}`,
     `Prompt construction strategy: ${definition.promptConstructionStrategy}`,
+    ...(definition.supplementalContextPlan?.length
+      ? [
+          '',
+          'Supplemental MCP context plan:',
+          ...definition.supplementalContextPlan.map((step) => `- ${step}`),
+        ]
+      : []),
     '',
     'Mandatory output requirements:',
     '- Always include a "Context Used" section.',
+    ...(definition.supplementalContextPlan?.length
+      ? ['- Always include an "External Context Used" section that names Jira/collab sources or says they were unavailable.']
+      : []),
     '- Always include a "Why Selected" section.',
     '- Always include a "Token Reduction" section with Files Scanned, Files Selected, estimated before/after tokens, and reduction percentage.',
     '- If a metric is not available from CodeGraph output, write "Unknown" and state what evidence is missing. Do not invent numbers.',
@@ -486,7 +504,7 @@ export function buildClarificationMarkdown(prompt: string): string {
     '- Explain Flow: `/explain <symbol or area>`',
     '- Analyze Impact: `/impact <symbol>`',
     '- Review Changes: `/review`',
-    '- Generate Fix Plan: `/fix_plan <task or issue>`',
+    '- Generate Plan: `/plan <task, issue, or collab doc>`',
     '- Generate Test Plan: `/test <symbol or behavior>`',
   ].join('\n');
 }
@@ -548,9 +566,9 @@ function resolveHeuristicWorkflow(prompt: string, editorContext: EditorIntentCon
     return baseIntent('test', target.value, target.type, target.value ? 0.72 : 0.5, 'heuristic', prompt);
   }
 
-  if (/\b(fix plan|implementation plan|implement|debug|bug|refactor|rename|extract)\b/u.test(lower)) {
-    const target = resolveTarget(prompt, 'fix_plan', editorContext);
-    return baseIntent('fix_plan', target.value, target.type, target.value ? 0.7 : 0.5, 'heuristic', prompt);
+  if (/\b(plan|fix plan|implementation plan|implement|debug|bug|refactor|rename|extract|jira|confluence|collab)\b/u.test(lower)) {
+    const target = resolveTarget(prompt, 'plan', editorContext);
+    return baseIntent('plan', target.value, target.type, target.value ? 0.7 : 0.5, 'heuristic', prompt);
   }
 
   if (/\b(explain|understand|how does|flow|what does)\b/u.test(lower)) {

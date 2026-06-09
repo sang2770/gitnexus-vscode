@@ -2,7 +2,7 @@
   "name": "codebrain-vscode",
   "displayName": "CodeBrain",
   "description": "Repository-aware AI workflow orchestration for CodeGraph, Copilot Chat, and MCP.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "codebrain",
   "license": "MIT",
   "repository": {
@@ -122,8 +122,8 @@
         "icon": "$(diff)"
       },
       {
-        "command": "codebrain.workflow.fixPlan",
-        "title": "Workflow: Generate Fix Plan",
+        "command": "codebrain.workflow.plan",
+        "title": "Workflow: Generate Plan",
         "category": "CodeBrain",
         "icon": "$(tasklist)"
       },
@@ -300,7 +300,7 @@
           "when": "editorTextFocus"
         },
         {
-          "command": "codebrain.workflow.fixPlan",
+          "command": "codebrain.workflow.plan",
           "group": "codebrain@3",
           "when": "editorTextFocus"
         },
@@ -336,7 +336,7 @@
       {
         "id": "codebrain.codegraph",
         "name": "CodeBrain",
-        "description": "Repository-aware workflow orchestration for CodeGraph retrieval, context optimization, and Copilot Agent task generation.",
+        "description": "Repository-aware workflow orchestration for CodeGraph retrieval, optional Atlassian context, context optimization, and Copilot Agent task generation.",
         "isSticky": true,
         "commands": [
           {
@@ -364,8 +364,8 @@
             "description": "Detect working-tree change impact and validation scope"
           },
           {
-            "name": "fix_plan",
-            "description": "Generate a structured Copilot Agent task with risks and tests"
+            "name": "plan",
+            "description": "Generate an implementation plan using CodeGraph plus optional Jira and collab context"
           }
         ]
       }

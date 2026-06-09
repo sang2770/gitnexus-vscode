@@ -119,7 +119,8 @@ export function activate(context: vscode.ExtensionContext): void {
     ['codebrain.workflow.review', prReviewCommand],
     ['codebrain.workflow.test', () => openWorkflowChatCommand('test')],
     ['codebrain.workflow.detectChange', () => openWorkflowChatCommand('detect_change')],
-    ['codebrain.workflow.fixPlan', () => openWorkflowChatCommand('fix_plan')],
+    ['codebrain.workflow.plan', () => openWorkflowChatCommand('plan')],
+    ['codebrain.workflow.fixPlan', () => openWorkflowChatCommand('plan')],
     [
       'codebrain.refreshTreeView',
       () => {

@@ -27,7 +27,7 @@ The result is a safer AI workflow for onboarding, refactoring, reviewing, and va
 | `@CodeBrain /review` | Review staged or working-tree changes. | Findings first, regression risks, missing coverage, and suggested fixes. |
 | `@CodeBrain /test` | Build a focused regression checklist. | Unit, integration, and affected-path test recommendations. |
 | `@CodeBrain /detect_change` | Map local diffs to impacted code paths. | Changed scope, graph impact, and follow-up validation. |
-| `@CodeBrain /fix_plan` | Prepare an Agent-ready implementation plan. | Tasks, target files, constraints, risks, and verification steps. |
+| `@CodeBrain /plan` | Prepare an Agent-ready implementation plan. | Jira/collab context when available, tasks, target files, constraints, risks, and verification steps. |
 
 ## Campaign Demo Guide
 
@@ -115,13 +115,13 @@ Expected result:
 - Missing tests or validation steps.
 - Clear explanation of selected context.
 
-### 8. Generate a fix plan
+### 8. Generate a plan
 
 Ask:
 
 ```text
-@CodeBrain /fix_plan
-Update the affected callers and propose the safest verification path.
+@CodeBrain /plan ABC-123
+Update the affected callers from the Jira issue and linked collab doc, then propose the safest verification path.
 ```
 
 Expected result:
@@ -140,7 +140,7 @@ Use this section when multiple people are evaluating the extension during an AI 
 | Presenter | Show how CodeBrain turns a repository into graph-backed AI context. | `@CodeBrain /architecture` |
 | Reviewer or judge | Ask what changed and whether the change is risky. | `CodeBrain: Workflow: Review Changes` |
 | Developer collaborator | Select a symbol and inspect affected callers, callees, and tests. | `CodeBrain: Impact Lens: Analyze Impact` |
-| AI agent operator | Convert analysis into a structured implementation task. | `@CodeBrain /fix_plan` |
+| AI agent operator | Convert analysis into a structured implementation task. | `@CodeBrain /plan` |
 
 Suggested collaboration flow:
 
@@ -148,7 +148,7 @@ Suggested collaboration flow:
 2. Reviewer asks for `/architecture` to confirm repository understanding.
 3. Developer collaborator makes or selects a small code change.
 4. Reviewer runs `/impact` or `Workflow: Review Changes`.
-5. AI agent operator uses `/fix_plan` to produce a safe execution plan.
+5. AI agent operator uses `/plan` to produce a safe execution plan.
 6. Team validates with `/test` before treating the result as merge-ready.
 
 ## Why It Is Different
@@ -170,7 +170,7 @@ Key differences:
 - Persistent repository intelligence instead of one-off prompt retrieval.
 - Local-first indexing, suitable for private and enterprise codebases.
 - Deterministic graph evidence for callers, callees, dependencies, and impact.
-- Workflow-specific context selection for explain, review, impact, test, and fix planning.
+- Workflow-specific context selection for explain, review, impact, test, and implementation planning.
 - Transparent context report so reviewers can see what the AI used.
 
 ## Core Features
@@ -265,7 +265,7 @@ Use CodeBrain as a safety layer around normal AI-assisted development:
 | `CodeBrain: Workflow: Review Changes` | `@CodeBrain /review` |
 | `CodeBrain: Workflow: Generate Test Plan` | `@CodeBrain /test` |
 | `CodeBrain: Workflow: Detect Change Impact` | `@CodeBrain /detect_change` |
-| `CodeBrain: Workflow: Generate Fix Plan` | `@CodeBrain /fix_plan` |
+| `CodeBrain: Workflow: Generate Plan` | `@CodeBrain /plan` |
 
 ### Impact Lens
 
@@ -338,7 +338,7 @@ Before submitting CodeBrain to an AI campaign:
 - Install and test `codebrain-vscode.vsix` in a clean VS Code window.
 - Run `CodeBrain: Setup CodeBrain Runtime`.
 - Run `CodeBrain: Analyze Workspace` on a demo repository.
-- Capture screenshots or video of `/architecture`, `/impact`, `/review`, and `/fix_plan`.
+- Capture screenshots or video of `/architecture`, `/impact`, `/review`, and `/plan`.
 - Include the repository link and the packaged VSIX in the submission.
 - Highlight that CodeBrain is local-first and uses graph-backed context selection.
 
@@ -350,7 +350,7 @@ CodeBrain v2 introduces a repository-aware AI workflow system powered by CodeGra
 
 Added:
 
-- `@CodeBrain` chat participant with `/architecture`, `/explain`, `/impact`, `/review`, `/test`, `/detect_change`, and `/fix_plan`.
+- `@CodeBrain` chat participant with `/architecture`, `/explain`, `/impact`, `/review`, `/test`, `/detect_change`, and `/plan`.
 - Workflow output contract for context, selection rationale, token reduction, scanned files, and selected files.
 - Bundled CodeGraph runtime and indexing lifecycle commands.
 - Impact Lens UI for callers, callees, affected tests, impact analysis, and chat handoff.
