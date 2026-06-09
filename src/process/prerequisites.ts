@@ -21,7 +21,7 @@ export async function ensureCodeBrainCli(token?: vscode.CancellationToken): Prom
   const ok = await ensureCodeBrainCliInstalled(token);
   if (!ok) {
     vscode.window.showErrorMessage(
-      'CodeBrain: CodeGraph runtime is not available. Run "CodeBrain: Prepare CodeGraph Runtime" or rebuild the extension.',
+      'CodeBrain: CodeGraph runtime is not available. Please upgrade or reinstall the extension.',
     );
   }
   return ok;

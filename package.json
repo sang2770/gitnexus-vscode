@@ -2,7 +2,7 @@
   "name": "codebrain-vscode",
   "displayName": "CodeBrain",
   "description": "Repository-aware AI workflow orchestration for CodeGraph, Copilot Chat, and MCP.",
-  "version": "2.0.1",
+  "version": "2.0.0",
   "publisher": "codebrain",
   "license": "MIT",
   "repository": {
@@ -26,11 +26,6 @@
       {
         "command": "codebrain.setup",
         "title": "Setup CodeBrain Runtime",
-        "category": "CodeBrain"
-      },
-      {
-        "command": "codebrain.installCli",
-        "title": "Prepare CodeGraph Runtime",
         "category": "CodeBrain"
       },
       {
@@ -392,7 +387,7 @@
     "eslint": "^9.0.0",
     "sharp": "^0.33.5",
     "typescript": "^5.4.0",
-    "vsce": "*"
+    "vsce": "2.15.0"
   },
   "dependencies": {
     "@dqbd/tiktoken": "^1.0.22",

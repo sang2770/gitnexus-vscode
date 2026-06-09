@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { execFileSync, spawn } from "child_process";
+import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -25,8 +25,6 @@ export interface CodeGraphRuntimeDescriptor {
 }
 
 let _outputChannel: vscode.OutputChannel | undefined;
-let _extensionStorageRoot: string | undefined;
-let _cliBuildPromise: Thenable<boolean> | undefined;
 
 const CLI_SETUP_STATE_FILE = ".codebrain-codegraph-setup-done";
 const ANSI_ESCAPE_SEQUENCE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/gu;
@@ -44,14 +42,11 @@ export function getOutputChannel(): vscode.OutputChannel {
 }
 
 export function initializeCodeBrainRuntime(storageRoot: string): void {
-  _extensionStorageRoot = storageRoot;
+  void storageRoot;
 }
 
 export function getSetupStateMarkerPath(): string {
-  const root =
-    _extensionStorageRoot ??
-    path.join(path.resolve(__dirname, "..", ".."), "runtime", "codegraph");
-  return path.join(root, CLI_SETUP_STATE_FILE);
+  return path.join(getBundledRuntimeRoot(), CLI_SETUP_STATE_FILE);
 }
 
 function getExtensionRoot(): string {
@@ -60,14 +55,6 @@ function getExtensionRoot(): string {
 
 function getBundledRuntimeRoot(): string {
   return path.join(getExtensionRoot(), "runtime", "codegraph");
-}
-
-function getDevelopmentCliPath(): string {
-  return path.join(getExtensionRoot(), "codegraph", "dist", "bin", "codegraph.js");
-}
-
-function getDevelopmentCodeGraphRoot(): string {
-  return path.join(getExtensionRoot(), "codegraph");
 }
 
 function getBundledRuntimeDescriptor(args: string[]): CodeGraphRuntimeDescriptor | null {
@@ -102,23 +89,8 @@ function getBundledRuntimeDescriptor(args: string[]): CodeGraphRuntimeDescriptor
   return null;
 }
 
-function getDevelopmentRuntimeDescriptor(args: string[]): CodeGraphRuntimeDescriptor | null {
-  const cliPath = getDevelopmentCliPath();
-  if (!fs.existsSync(cliPath)) {
-    return null;
-  }
-
-  return {
-    command: "node",
-    args: ["--liftoff-only", cliPath, ...args],
-    shell: false,
-    runtimeRoot: getDevelopmentCodeGraphRoot(),
-    kind: "development",
-  };
-}
-
 export function getCodeGraphRuntimeDescriptor(args: string[] = []): CodeGraphRuntimeDescriptor | null {
-  return getBundledRuntimeDescriptor(args) ?? getDevelopmentRuntimeDescriptor(args);
+  return getBundledRuntimeDescriptor(args);
 }
 
 export function hasBundledCodeGraphRuntime(): boolean {
@@ -157,9 +129,7 @@ function buildSpawnDescriptor(args: string[]): {
 } {
   const descriptor = getCodeGraphRuntimeDescriptor(args);
   if (!descriptor) {
-    throw new Error(
-      "CodeGraph runtime not found. Run npm run build, or rebuild the extension package.",
-    );
+    throw new Error("Bundled CodeGraph runtime not found.");
   }
 
   return descriptor;
@@ -175,37 +145,6 @@ function quoteForShell(arg: string): string {
 export function buildCodeBrainTerminalCommand(args: string[]): string {
   const descriptor = buildSpawnDescriptor(args);
   return [descriptor.command, ...descriptor.args].map(quoteForShell).join(" ");
-}
-
-export function resolveNpmBin(): string | null {
-  try {
-    const cmd = process.platform === "win32" ? "where" : "which";
-    const result = execFileSync(cmd, ["npm"], {
-      encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return (
-      result
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .find((line) => line.length > 0) ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
-export function resolveNodeVersion(): string | null {
-  try {
-    return execFileSync("node", ["--version"], {
-      encoding: "utf-8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
 }
 
 export async function runCodeBrain(
@@ -282,119 +221,11 @@ export async function runCodeBrain(
   });
 }
 
-async function runCommand(
-  cmd: string,
-  args: string[],
-  cwd: string,
-  channel: vscode.OutputChannel,
-  token?: vscode.CancellationToken,
-): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const proc = spawn(cmd, args, {
-      cwd,
-      env: process.env,
-      shell: false,
-      windowsHide: true,
-    });
-
-    proc.stdout?.on("data", (chunk: Buffer) =>
-      channel.append(sanitizeOutputForChannel(chunk.toString())),
-    );
-    proc.stderr?.on("data", (chunk: Buffer) =>
-      channel.append(sanitizeOutputForChannel(chunk.toString())),
-    );
-
-    token?.onCancellationRequested(() => {
-      try {
-        proc.kill();
-      } catch {}
-    });
-
-    proc.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`Process exited with code ${code}`));
-      }
-    });
-    proc.on("error", (err) => reject(err));
-  });
-}
-
-export async function installCodeBrainCli(
-  token?: vscode.CancellationToken,
-): Promise<boolean> {
-  const channel = getOutputChannel();
-  channel.show(true);
-
-  const sourceRoot = getDevelopmentCodeGraphRoot();
-  if (!fs.existsSync(path.join(sourceRoot, "package.json"))) {
-    channel.appendLine("[CodeGraph] Local CodeGraph source is not available.");
-    return hasBundledCodeGraphRuntime();
-  }
-
-  const npm = resolveNpmBin();
-  if (!npm) {
-    channel.appendLine("[CodeGraph] npm not found. Install Node.js/npm first.");
-    return false;
-  }
-
-  const npmCmd = process.platform === "win32" ? "cmd" : npm;
-  const ciArgs =
-    process.platform === "win32" ? ["/c", npm, "ci"] : ["ci"];
-  const buildArgs =
-    process.platform === "win32"
-      ? ["/c", npm, "run", "build"]
-      : ["run", "build"];
-
-  try {
-    channel.appendLine(`\n[CodeGraph] Building local CodeGraph from ${sourceRoot}`);
-    await runCommand(npmCmd, ciArgs, sourceRoot, channel, token);
-    await runCommand(npmCmd, buildArgs, sourceRoot, channel, token);
-    channel.appendLine("[CodeGraph] Bundling self-contained runtime...");
-    const bundleArgs =
-      process.platform === "win32"
-        ? ["/c", npm, "run", "bundle:cli"]
-        : ["run", "bundle:cli"];
-    await runCommand(npmCmd, bundleArgs, getExtensionRoot(), channel, token);
-    const ok = Boolean(getBundledRuntimeDescriptor([]));
-    channel.appendLine(
-      ok
-        ? "[CodeGraph] Bundled is ready."
-        : "[CodeGraph] Build completed but bundled was not found.",
-    );
-    return ok;
-  } catch (err) {
-    channel.appendLine(
-      `[CodeGraph] Build failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return false;
-  }
-}
-
 export async function ensureCodeBrainCliInstalled(
   token?: vscode.CancellationToken,
 ): Promise<boolean> {
-  if (hasBundledCodeGraphRuntime()) {
-    return true;
-  }
-
-  if (_cliBuildPromise) {
-    return _cliBuildPromise;
-  }
-
-  const buildPromise = vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: "CodeBrain: Preparing CodeGraph...",
-      cancellable: false,
-    },
-    () => installCodeBrainCli(token),
-  );
-  _cliBuildPromise = buildPromise;
-  const result = await buildPromise;
-  _cliBuildPromise = undefined;
-  return result || Boolean(getDevelopmentRuntimeDescriptor([]));
+  void token;
+  return true;
 }
 
 export function getWorkspaceRoot(): string {

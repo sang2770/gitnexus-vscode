@@ -6,7 +6,7 @@ import {
 } from './commands/analyze.js';
 import { cleanCommand, statusCommand } from './commands/clean.js';
 import { prReviewCommand, queryCommand } from './commands/misc.js';
-import { createCopilotAgentCommand, installCliCommand, setupCommand } from './commands/setup.js';
+import { createCopilotAgentCommand, setupCommand } from './commands/setup.js';
 import { selectTokenOptimizationModeCommand } from './commands/token-optimization.js';
 import { openWorkflowChatCommand } from './commands/workflow.js';
 import { runStartupHealthCheck } from './config/startup-health-check.js';
@@ -82,7 +82,6 @@ export function activate(context: vscode.ExtensionContext): void {
         return runAnalyzeWithStatus();
       },
     ],
-    ['codebrain.installCli', installCliCommand],
     ['codebrain.createCopilotAgent', createCopilotAgentCommand],
     ['codebrain.checkForUpdates', () => checkForExtensionUpdatesCommand(context)],
     ['codebrain.tokenOptimization.selectMode', selectTokenOptimizationModeCommand],
@@ -153,7 +152,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   void runStartupHealthCheck();
-  void checkForExtensionUpdates(context);
+  // void checkForExtensionUpdates(context);
 }
 
 export function deactivate(): void {}

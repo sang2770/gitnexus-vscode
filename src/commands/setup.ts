@@ -35,10 +35,6 @@ export async function setupCommand(): Promise<boolean> {
   return true;
 }
 
-export async function installCliCommand(): Promise<void> {
-  await ensureCodeBrainCli();
-}
-
 export async function createCopilotAgentCommand(): Promise<void> {
   const channel = getOutputChannel();
   channel.show(true);
