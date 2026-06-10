@@ -59,13 +59,17 @@ function getBundledRuntimeRoot(): string {
 
 function getBundledRuntimeDescriptor(args: string[]): CodeGraphRuntimeDescriptor | null {
   const runtimeRoot = getBundledRuntimeRoot();
+  const entry = path.join(runtimeRoot, "lib", "dist", "bin", "codegraph.js");
+  const channel = getOutputChannel();
+  if (!fs.existsSync(entry)) {
+    channel.appendLine(`[CodeGraph runtime entry point not found at expected location: ${entry}]`);
+    return null;
+  }
 
   if (process.platform === "win32") {
-    const nodeExe = path.join(runtimeRoot, "node.exe");
-    const entry = path.join(runtimeRoot, "lib", "dist", "bin", "codegraph.js");
-    if (fs.existsSync(nodeExe) && fs.existsSync(entry)) {
+    if (fs.existsSync(path.join(runtimeRoot, "bin", "codegraph.cmd"))) {
       return {
-        command: nodeExe,
+        command: "node",
         args: ["--liftoff-only", entry, ...args],
         shell: false,
         runtimeRoot,
@@ -85,7 +89,7 @@ function getBundledRuntimeDescriptor(args: string[]): CodeGraphRuntimeDescriptor
       kind: "bundled",
     };
   }
-
+  channel.appendLine(`[CodeGraph runtime launcher not found at expected location: ${launcher}]`);
   return null;
 }
 

@@ -384,6 +384,7 @@
     "@types/vscode": "^1.106.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "esbuild": "^0.28.0",
     "eslint": "^9.0.0",
     "sharp": "^0.33.5",
     "typescript": "^5.4.0",

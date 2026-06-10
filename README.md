@@ -177,7 +177,7 @@ Key differences:
 
 - VS Code chat participant: `@CodeBrain`.
 - Built-in MCP server definition provider: `codebrain.codegraph`.
-- Bundled CodeGraph runtime under `runtime/codegraph`.
+- Bundled CodeGraph runtime assets under `runtime/codegraph`, executed with the system `node`.
 - Impact Lens view for symbol-level impact, callers, callees, tests, and chat handoff.
 - Token optimization modes: `auto`, `compact`, `balanced`, `full`, `off`.
 - Copilot Agent scaffold at `.github/agents/codebrain.agent.md`.
@@ -188,7 +188,7 @@ Key differences:
 - VS Code `^1.106.0`
 - GitHub Copilot Chat extension
 - Active GitHub Copilot sign-in
-- Node.js for extension development and packaging
+- Node.js installed on the host machine (required by the extension runtime, development, and packaging)
 
 ## Installation
 
