@@ -152,13 +152,14 @@ async function runSearchQuery(
 
       try {
         const parsed = JSON.parse(result.stdout) as QueryResultItem[];
+        const ranked = rankSearchResults(parsed, request.search);
         const optimized = tokenSettings.enabled
-          ? parsed.slice(0, tokenSettings.queryResultLimit)
-          : parsed;
+          ? ranked.slice(0, tokenSettings.queryResultLimit)
+          : ranked;
         const metadata: QueryReportMetadata = {
           allResultCount: parsed.length,
           filesScanned,
-          workflow: await buildQueryWorkflowData(parsed, depth, workspaceRoot, token, request.warnings),
+          workflow: await buildQueryWorkflowData(ranked, depth, workspaceRoot, token, request.warnings),
         };
 
         if (token.isCancellationRequested) {
@@ -175,6 +176,103 @@ async function runSearchQuery(
       }
     },
   );
+}
+
+function rankSearchResults(results: QueryResultItem[], query: string): QueryResultItem[] {
+  const normalizedQuery = normalizeSearchText(query);
+  const terms = normalizedQuery.split(' ').filter((term) => term.length > 1);
+
+  return results
+    .map((result, index) => ({
+      result,
+      index,
+      rank: scoreSearchResult(result, normalizedQuery, terms, index),
+    }))
+    .sort((left, right) => {
+      if (right.rank !== left.rank) {
+        return right.rank - left.rank;
+      }
+
+      const leftScore = left.result.score ?? 0;
+      const rightScore = right.result.score ?? 0;
+      if (rightScore !== leftScore) {
+        return rightScore - leftScore;
+      }
+
+      return left.index - right.index;
+    })
+    .map((entry) => entry.result);
+}
+
+function scoreSearchResult(
+  result: QueryResultItem,
+  normalizedQuery: string,
+  terms: string[],
+  index: number,
+): number {
+  const node = result.node;
+  if (!node) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const cliScore = Number.isFinite(result.score ?? Number.NaN) ? (result.score ?? 0) : 0;
+  const normalizedName = normalizeSearchText(node.name);
+  const normalizedQualifiedName = normalizeSearchText(node.qualifiedName);
+  const normalizedPath = normalizeSearchText(node.filePath);
+  const haystack = [normalizedName, normalizedQualifiedName].filter(Boolean).join(' ');
+
+  let rank = cliScore * 1000;
+
+  if (normalizedQuery) {
+    if (normalizedName === normalizedQuery || normalizedQualifiedName === normalizedQuery) {
+      rank += 100000;
+    } else if (normalizedName.startsWith(normalizedQuery) || normalizedQualifiedName.startsWith(normalizedQuery)) {
+      rank += 25000;
+    } else if (normalizedName.includes(normalizedQuery) || normalizedQualifiedName.includes(normalizedQuery)) {
+      rank += 12000;
+    }
+  }
+
+  for (const term of terms) {
+    if (haystack.includes(term)) {
+      rank += 900;
+    }
+    if (normalizedPath.includes(term)) {
+      rank += 250;
+    }
+  }
+
+  rank += kindPriority(node.kind) * 40;
+  rank -= (node.filePath?.split(/[\\/]+/u).filter(Boolean).length ?? 0) * 2;
+  rank -= index * 0.001;
+  return rank;
+}
+
+function normalizeSearchText(value: string | undefined): string {
+  return (value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_./-]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function kindPriority(kind: string | undefined): number {
+  switch ((kind ?? '').toLowerCase()) {
+    case 'class':
+    case 'component':
+    case 'route':
+      return 4;
+    case 'function':
+    case 'method':
+      return 3;
+    case 'interface':
+    case 'type':
+      return 2;
+    case 'variable':
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 async function runDirectGraphQuery(

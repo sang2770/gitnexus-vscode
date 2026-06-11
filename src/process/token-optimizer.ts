@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { get_encoding, type Tiktoken } from '@dqbd/tiktoken';
+import { encoding_for_model, get_encoding, type Tiktoken, type TiktokenModel } from '@dqbd/tiktoken';
 import type { ContextMode } from '../workflows/intent-resolver.js';
 
 export type TokenOptimizationMode = ContextMode | 'auto' | 'off';
@@ -31,8 +31,10 @@ export interface TokenReductionReport {
   source: string;
 }
 
-let encoder: Tiktoken | undefined;
-let encoderFailed = false;
+let defaultEncoder: Tiktoken | undefined;
+let defaultEncoderFailed = false;
+const modelEncoders = new Map<string, Tiktoken>();
+const failedModelEncoders = new Set<string>();
 
 const MODE_DEFAULTS: Record<ContextMode, {
   defaultBudget: number;
@@ -79,27 +81,11 @@ export function getTokenOptimizationSettings(defaultMode: ContextMode): TokenOpt
   };
 }
 
-export function estimateTokens(text: string): { tokens: number; estimator: TokenEstimatorKind } {
-  if (!text) {
-    return { tokens: 0, estimator: encoderFailed ? 'heuristic' : 'tiktoken' };
-  }
-
-  if (!encoderFailed) {
-    try {
-      encoder ??= get_encoding('o200k_base');
-      return {
-        tokens: encoder.encode(text).length,
-        estimator: 'tiktoken',
-      };
-    } catch {
-      encoderFailed = true;
-    }
-  }
-
-  return {
-    tokens: estimateTokensHeuristic(text),
-    estimator: 'heuristic',
-  };
+export function estimateTokens(
+  text: string,
+  modelId?: string,
+): { tokens: number; estimator: TokenEstimatorKind } {
+  return estimateTokensForModel(text, modelId);
 }
 
 export function createTokenReductionReport(input: {
@@ -109,11 +95,12 @@ export function createTokenReductionReport(input: {
   source: string;
   filesScanned?: number;
   selectedFiles?: string[];
+  modelId?: string;
 }): TokenReductionReport {
   const settings = getTokenOptimizationSettings(input.defaultMode);
-  const before = estimateTokens(input.beforeText);
+  const before = estimateTokensForModel(input.beforeText, input.modelId);
   const after = settings.enabled
-    ? estimateTokens(input.afterText)
+    ? estimateTokensForModel(input.afterText, input.modelId)
     : before;
   const beforeTokens = before.tokens;
   const afterTokens = after.tokens;
@@ -142,25 +129,26 @@ export function createTokenReductionReport(input: {
 }
 
 export function buildTokenReductionMarkdown(report: TokenReductionReport): string {
-  const filesSelected = report.filesSelected ?? report.selectedFiles?.length;
+  const mode = `${report.configuredMode}${report.configuredMode === 'auto' ? ` -> ${report.effectiveMode}` : ''}`;
+  const promptReduction = `${formatNumber(report.beforeTokens)} -> ${formatNumber(report.afterTokens)} tokens (${report.reductionPercent}% saved)`;
   const selectedFiles = report.selectedFiles?.length
-    ? report.selectedFiles.slice(0, 12).map((file) => `- ${file}`).join('\n')
-    : '- Unknown';
-
-  return [
-    'Token Optimization:',
-    `- Mode: ${report.configuredMode}${report.configuredMode === 'auto' ? ` -> ${report.effectiveMode}` : ''}`,
+    ? report.selectedFiles.slice(0, 6).map((file) => `- ${file}`).join('\n')
+    : undefined;
+  const lines = [
+    'Token Reduction:',
+    `- Mode: ${mode}`,
     `- Enabled: ${report.enabled ? 'yes' : 'no'}`,
     `- Budget: ${formatNumber(report.tokenBudget)} tokens`,
-    `- Estimated before: ${formatNumber(report.beforeTokens)} tokens`,
-    `- Estimated after: ${formatNumber(report.afterTokens)} tokens`,
-    `- Reduction: ${formatNumber(report.reductionTokens)} tokens (${report.reductionPercent}%)`,
+    `- Prompt: ${promptReduction}`,
     `- Files scanned: ${report.filesScanned === undefined ? 'Unknown' : formatNumber(report.filesScanned)}`,
-    `- Files selected: ${filesSelected === undefined ? 'Unknown' : formatNumber(filesSelected)}`,
-    `- Estimator: ${report.estimator}`,
-    'Selected files:',
-    selectedFiles,
-  ].join('\n');
+    `- Files selected: ${report.filesSelected === undefined ? 'Unknown' : formatNumber(report.filesSelected)}`,
+  ];
+
+  if (selectedFiles) {
+    lines.push('Selected files:', selectedFiles);
+  }
+
+  return lines.join('\n');
 }
 
 export function truncateForTokenMode(text: string, maxChars: number): string {
@@ -205,6 +193,60 @@ function estimateTokensHeuristic(text: string): number {
 
   const wordLike = normalized.match(/[A-Za-z0-9_]+|[^\sA-Za-z0-9_]/gu)?.length ?? 0;
   return Math.max(1, Math.ceil(wordLike * 0.75));
+}
+
+function estimateTokensForModel(
+  text: string,
+  modelId?: string,
+): { tokens: number; estimator: TokenEstimatorKind } {
+  const encoder = getTokenEncoder(modelId);
+  if (!text) {
+    return {
+      tokens: 0,
+      estimator: encoder ? 'tiktoken' : 'heuristic',
+    };
+  }
+
+  if (encoder) {
+    return {
+      tokens: encoder.encode(text).length,
+      estimator: 'tiktoken',
+    };
+  }
+
+  return {
+    tokens: estimateTokensHeuristic(text),
+    estimator: 'heuristic',
+  };
+}
+
+function getTokenEncoder(modelId?: string): Tiktoken | undefined {
+  const trimmedModelId = modelId?.trim();
+  if (trimmedModelId && !failedModelEncoders.has(trimmedModelId)) {
+    const cachedModelEncoder = modelEncoders.get(trimmedModelId);
+    if (cachedModelEncoder) {
+      return cachedModelEncoder;
+    }
+
+    try {
+      const modelEncoder = encoding_for_model(trimmedModelId as TiktokenModel);
+      modelEncoders.set(trimmedModelId, modelEncoder);
+      return modelEncoder;
+    } catch {
+      failedModelEncoders.add(trimmedModelId);
+    }
+  }
+
+  if (!defaultEncoderFailed) {
+    try {
+      defaultEncoder ??= get_encoding('o200k_base');
+      return defaultEncoder;
+    } catch {
+      defaultEncoderFailed = true;
+    }
+  }
+
+  return undefined;
 }
 
 function formatNumber(value: number): string {

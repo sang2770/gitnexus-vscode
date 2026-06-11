@@ -3,6 +3,7 @@ import { getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
 import {
   buildTokenReductionMarkdown,
   createTokenReductionReport,
+  estimateTokens,
   getTokenOptimizationSettings,
   truncateForTokenMode,
 } from '../process/token-optimizer.js';
@@ -212,48 +213,134 @@ export class CodeGraphAgentParticipant {
     request: vscode.ChatRequest,
     chatContext: vscode.ChatContext,
     intent: WorkflowIntent,
+    modelId?: string,
   ): vscode.LanguageModelChatMessage[] {
     const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
-    const fullHistory = chatContext.history
-      .slice(-8)
-      .map((turn) => this.formatHistoryTurn(turn, 1600))
-      .filter(Boolean)
-      .join('\n');
-    const optimizedHistory = chatContext.history
-      .slice(tokenSettings.enabled ? -tokenSettings.historyTurnLimit : -8)
-      .map((turn) => this.formatHistoryTurn(
-        turn,
-        tokenSettings.enabled ? tokenSettings.historyCharsPerTurn : 1600,
-      ))
-      .filter(Boolean)
-      .join('\n');
-
-    const basePrompt = [
-      this.buildInstructions(intent),
-      optimizedHistory ? `Recent chat history:\n${optimizedHistory}` : undefined,
-      `Current user request:\n${request.prompt}`,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
-    const beforePrompt = [
-      this.buildInstructions(intent),
-      fullHistory ? `Recent chat history:\n${fullHistory}` : undefined,
-      `Current user request:\n${request.prompt}`,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    const instructions = this.buildInstructions(intent);
+    const historyWindow = chatContext.history.slice(-8);
+    const optimizedPrompt = this.buildOptimizedPrompt({
+      instructions,
+      requestPrompt: request.prompt,
+      history: historyWindow,
+      tokenSettings,
+      modelId,
+    });
+    const beforePrompt = this.composePromptSections({
+      instructions,
+      requestPrompt: request.prompt,
+      history: this.buildHistoryBlock(historyWindow, 1600),
+    });
     const report = createTokenReductionReport({
       beforeText: beforePrompt,
-      afterText: basePrompt,
+      afterText: optimizedPrompt.prompt,
       defaultMode: intent.contextMode,
       source: 'chat-initial-prompt',
+      modelId,
     });
-    const prompt = [
-      basePrompt,
+    const prompt = this.appendOptionalPromptSection(
+      optimizedPrompt.prompt,
       buildTokenReductionMarkdown(report),
-    ].join('\n\n');
+      tokenSettings.tokenBudget,
+      modelId,
+    );
 
     return [vscode.LanguageModelChatMessage.User(prompt)];
+  }
+
+  private buildOptimizedPrompt(input: {
+    instructions: string;
+    requestPrompt: string;
+    history: Array<vscode.ChatRequestTurn | vscode.ChatResponseTurn>;
+    tokenSettings: ReturnType<typeof getTokenOptimizationSettings>;
+    modelId?: string;
+  }): {
+    prompt: string;
+    historyTurnLimitUsed: number;
+    historyCharsPerTurnUsed: number;
+  } {
+    const recentHistory = input.history.slice(-8);
+    const enabled = input.tokenSettings.enabled;
+    const maxHistoryTurns = enabled
+      ? Math.min(input.tokenSettings.historyTurnLimit, recentHistory.length)
+      : recentHistory.length;
+    const maxCharsPerTurn = enabled ? input.tokenSettings.historyCharsPerTurn : 1600;
+    const minCharsPerTurn = enabled
+      ? Math.max(120, Math.floor(input.tokenSettings.historyCharsPerTurn / 3))
+      : maxCharsPerTurn;
+
+    let turnLimit = maxHistoryTurns;
+    let charsPerTurn = maxCharsPerTurn;
+    let historyText = this.buildHistoryBlock(recentHistory.slice(-turnLimit), charsPerTurn);
+    let prompt = this.composePromptSections({
+      instructions: input.instructions,
+      history: historyText,
+      requestPrompt: input.requestPrompt,
+    });
+
+    if (enabled) {
+      while (turnLimit > 0 && estimateTokens(prompt, input.modelId).tokens > input.tokenSettings.tokenBudget) {
+        const canShrinkChars = charsPerTurn > minCharsPerTurn;
+        const canDropTurn = turnLimit > 1;
+
+        if (canShrinkChars) {
+          charsPerTurn = Math.max(minCharsPerTurn, Math.floor(charsPerTurn * 0.8));
+        } else if (canDropTurn) {
+          turnLimit -= 1;
+          charsPerTurn = maxCharsPerTurn;
+        } else {
+          break;
+        }
+
+        historyText = this.buildHistoryBlock(recentHistory.slice(-turnLimit), charsPerTurn);
+        prompt = this.composePromptSections({
+          instructions: input.instructions,
+          history: historyText,
+          requestPrompt: input.requestPrompt,
+        });
+      }
+    }
+
+    return {
+      prompt,
+      historyTurnLimitUsed: turnLimit,
+      historyCharsPerTurnUsed: charsPerTurn,
+    };
+  }
+
+  private buildHistoryBlock(
+    history: Array<vscode.ChatRequestTurn | vscode.ChatResponseTurn>,
+    maxCharsPerTurn: number,
+  ): string | undefined {
+    const text = history
+      .map((turn) => this.formatHistoryTurn(turn, maxCharsPerTurn))
+      .filter(Boolean)
+      .join('\n');
+
+    return text || undefined;
+  }
+
+  private composePromptSections(input: {
+    instructions: string;
+    requestPrompt: string;
+    history?: string;
+  }): string {
+    return [
+      input.instructions,
+      input.history ? `Recent chat history:\n${input.history}` : undefined,
+      `Current user request:\n${input.requestPrompt}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  private appendOptionalPromptSection(
+    prompt: string,
+    optionalSection: string,
+    tokenBudget: number,
+    modelId?: string,
+  ): string {
+    const candidate = [prompt, optionalSection].join('\n\n');
+    return estimateTokens(candidate, modelId).tokens <= tokenBudget ? candidate : prompt;
   }
 
   private formatHistoryTurn(turn: vscode.ChatRequestTurn | vscode.ChatResponseTurn, maxChars: number): string {
@@ -299,7 +386,7 @@ export class CodeGraphAgentParticipant {
     intent: WorkflowIntent,
     selectedTools: vscode.LanguageModelToolInformation[],
   ): Promise<vscode.ChatResult> {
-    const messages = this.buildInitialMessages(request, chatContext, intent);
+    const messages = this.buildInitialMessages(request, chatContext, intent, model.id);
 
     for (let round = 0; round < MAX_TOOL_CALL_ROUNDS; round += 1) {
       const toolSelection = this.selectToolsForRound(selectedTools, intent, request, round);
