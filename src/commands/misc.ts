@@ -3,6 +3,11 @@ import { execFileSync } from 'child_process';
 import * as path from 'path';
 import { ensureCodeBrainCli } from '../process/prerequisites.js';
 import { getOutputChannel, getWorkspaceRoot, runCodeBrain } from '../process/cli-runner.js';
+import {
+  getCompareChangedFiles,
+  getStagedChangedFiles,
+  getWorkingTreeChangedFiles,
+} from '../process/review-git.js';
 import { getTokenOptimizationSettings } from '../process/token-optimizer.js';
 import {
   showQueryReport,
@@ -904,35 +909,13 @@ function getChangedFilesForReview(cwd: string, mode: PrReviewMode): string[] {
     case 'current-file':
       return mode.filePath ? [mode.filePath] : [];
     case 'staged':
-      return getGitDiffFiles(cwd, ['diff', '--name-only', '--cached']);
+      return getStagedChangedFiles(cwd, MAX_CHANGED_FILES);
     case 'all':
-      return unique([
-        ...getGitDiffFiles(cwd, ['diff', '--name-only', 'HEAD']),
-        ...getGitDiffFiles(cwd, ['ls-files', '--others', '--exclude-standard']),
-      ]);
+      return getWorkingTreeChangedFiles(cwd, MAX_CHANGED_FILES);
     case 'compare':
-      return getGitDiffFiles(cwd, ['diff', '--name-only', `${mode.baseRef ?? 'main'}...HEAD`]);
+      return getCompareChangedFiles(cwd, mode.baseRef ?? 'main', MAX_CHANGED_FILES);
     default:
       return [];
-  }
-}
-
-function getGitDiffFiles(cwd: string, args: string[]): string[] {
-  try {
-    const out = execFileSync('git', args, {
-      cwd,
-      encoding: 'utf-8',
-      timeout: 10000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-
-    return out
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .slice(0, MAX_CHANGED_FILES);
-  } catch {
-    return [];
   }
 }
 
@@ -1172,10 +1155,6 @@ function truncateText(text: string, limit: number): string {
 
 function escapeCodeFence(text: string): string {
   return text.replace(/```/g, '`` `');
-}
-
-function unique(values: string[]): string[] {
-  return Array.from(new Set(values)).slice(0, MAX_CHANGED_FILES);
 }
 
 function getDefaultBaseRef(cwd: string): string {

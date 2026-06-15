@@ -229,7 +229,7 @@
     "mcpServerDefinitionProviders": [
       {
         "id": "codebrain.codegraph",
-        "label": "CodeGraph"
+        "label": "CodeBrain Graph"
       }
     ],
     "chatSkills": [

@@ -44,7 +44,6 @@ export function activate(context: vscode.ExtensionContext): void {
   setTimeout(() => {
     staleness = new StalenessMonitor(statusBar);
     staleness.start();
-    console.log("Hello");
     context.subscriptions.push(staleness);
   }, 1000);
 

@@ -109,7 +109,7 @@ export const CODEBRAIN_COPILOT_AGENT = [
   '- Never do broad grep/read loops before trying CodeGraph retrieval.',
   '- Never edit a non-trivial shared symbol without impact analysis.',
   '- Never ignore stale-index warnings.',
-  '- Never reference retired GitNexus-only tools such as `gitnexus_context`, `gitnexus_impact`, Cypher, registry, groups, or process URI resources.',
+  '- Never reference unavailable tools outside the CodeGraph toolset exposed to this agent.',
   '- Never treat CodeGraph as a replacement for compilers, tests, lint, or runtime validation.',
   '',
   '## Self-Check Before Finishing',

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
+import { hasWorkingTreeDiff, isInsideGitWorkTree } from '../process/review-git.js';
 import {
   buildTokenReductionMarkdown,
   createTokenReductionReport,
@@ -16,6 +17,16 @@ import {
   type WorkflowIntent,
   WORKFLOW_DEFINITIONS,
 } from '../workflows/intent-resolver.js';
+import { chatOptimizationManager } from './chat-optimization-config.js';
+import { chatMetricsCollector } from './chat-metrics.js';
+
+interface ConversationState {
+  lastIntent?: WorkflowIntent;
+  seenFiles: Set<string>;
+  seenSymbols: Set<string>;
+  toolResultSummary: string[];
+  lastUpdate: number;
+}
 
 const PARTICIPANT_ID = 'codebrain.codegraph';
 const MAX_TOOL_CALL_ROUNDS = 5;
@@ -34,7 +45,40 @@ const TOOL_ALIASES: Record<CodeGraphToolKind, string[]> = {
 };
 
 export class CodeGraphAgentParticipant {
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  private conversationStates = new Map<string, ConversationState>();
+  private instructionCache = new Map<string, { instructions: string, timestamp: number }>();
+  private lastCleanup = Date.now();
+
+  constructor(private readonly context: vscode.ExtensionContext) {
+    // Regular cleanup of old session states
+    setInterval(() => this.cleanupStates(), 15 * 60 * 1000);
+  }
+
+  private cleanupStates(): void {
+    const now = Date.now();
+    const config = chatOptimizationManager.getConfig();
+    for (const [id, state] of this.conversationStates.entries()) {
+      if (now - state.lastUpdate > config.stateCleanupIntervalMs) {
+        this.conversationStates.delete(id);
+      }
+    }
+  }
+
+  private getOrCreateState(request: vscode.ChatRequest): ConversationState {
+    const id = request.command || 'default';
+    let state = this.conversationStates.get(id);
+    if (!state) {
+      state = {
+        seenFiles: new Set(),
+        seenSymbols: new Set(),
+        toolResultSummary: [],
+        lastUpdate: Date.now(),
+      };
+      this.conversationStates.set(id, state);
+    }
+    state.lastUpdate = Date.now();
+    return state;
+  }
 
   private resolveIntent(request: vscode.ChatRequest): WorkflowIntent {
     const workspaceRoot = getWorkspaceRoot();
@@ -51,14 +95,42 @@ export class CodeGraphAgentParticipant {
     };
   }
 
-  private buildInstructions(intent: WorkflowIntent): string {
+  private buildInstructions(intent: WorkflowIntent, compact: boolean = false): string {
+    const config = chatOptimizationManager.getConfig();
+    const cacheKey = `${intent.workflow}_${intent.contextMode}_${compact ? 'compact' : 'full'}`;
+    
+    if (config.enableInstructionCaching) {
+      const cached = this.instructionCache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp < config.cacheTtlMs)) {
+        return cached.instructions;
+      }
+    }
+
     const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
+    
+    if (compact) {
+      // Very brief instructions for follow-up turns
+      const instructions = [
+        `CodeBrain follow-up (${intent.workflow})`,
+        `Workspace: ${getWorkspaceRoot()}`,
+        `Context: ${intent.contextMode}`,
+        'Continue using CodeGraph tools. Maintain workflow output: Context -> Findings -> Plan/Task.',
+        'Match the language of the user request in your response.',
+      ].join('\n');
+
+      if (config.enableInstructionCaching) {
+        this.instructionCache.set(cacheKey, { instructions, timestamp: Date.now() });
+      }
+      return instructions;
+    }
+
     const definition = WORKFLOW_DEFINITIONS[intent.workflow];
     const supplementalHints = definition.supplementalMcpToolHints ?? [];
     const toolScope = supplementalHints.length > 0
       ? `Use the selected CodeGraph MCP tools plus matching supplemental MCP context tools for this workflow. Supplemental hints: ${supplementalHints.join(', ')}.`
       : 'Use only the CodeGraph MCP tools selected for this workflow unless a later tool result proves a narrower follow-up is necessary.';
-    return [
+    
+    const instructions = [
       buildWorkflowInstructions(intent),
       '',
       'Token optimization settings:',
@@ -69,7 +141,15 @@ export class CodeGraphAgentParticipant {
       '',
       `Workspace path: ${getWorkspaceRoot()}`,
       toolScope,
+      '',
+      'Mandatory: Respond in the same language as the user request (including session headers and section titles).',
     ].join('\n');
+
+    if (config.enableInstructionCaching) {
+      this.instructionCache.set(cacheKey, { instructions, timestamp: Date.now() });
+    }
+
+    return instructions;
   }
 
   private normalizeToolName(name: string): string {
@@ -118,6 +198,7 @@ export class CodeGraphAgentParticipant {
   }
 
   private selectToolsForIntent(intent: WorkflowIntent): vscode.LanguageModelToolInformation[] {
+    const config = chatOptimizationManager.getConfig();
     const definition = WORKFLOW_DEFINITIONS[intent.workflow];
     const allowedKinds = definition.mcpToolsRequired;
     const selected = vscode.lm.tools.filter((tool) => {
@@ -133,7 +214,8 @@ export class CodeGraphAgentParticipant {
       return hints.length > 0 && !this.isCodeBrainTool(tool) && this.toolMatchesAnyHint(tool, hints);
     });
     const codeGraphTools = selected.length > 0 ? selected : fallbackCodeGraphTools;
-    return this.dedupeTools([...codeGraphTools, ...supplementalTools]).slice(0, 12);
+    const deduped = this.dedupeTools([...codeGraphTools, ...supplementalTools]);
+    return config.enableProgressiveTools ? deduped.slice(0, config.maxToolsTotal) : deduped.slice(0, 12);
   }
 
   private dedupeTools(tools: vscode.LanguageModelToolInformation[]): vscode.LanguageModelToolInformation[] {
@@ -164,6 +246,33 @@ export class CodeGraphAgentParticipant {
     tools?: vscode.LanguageModelChatTool[];
     toolMode?: vscode.LanguageModelChatToolMode;
   } {
+    const config = chatOptimizationManager.getConfig();
+    
+    // Phase 2: Progressive Tool Selection
+    if (config.enableProgressiveTools && round === 0) {
+      const requiredSteps = WORKFLOW_DEFINITIONS[intent.workflow].toolPlan.filter((step) => step.required);
+      const essentialTools: vscode.LanguageModelToolInformation[] = [];
+      
+      // Always include the first required tool kind if available
+      if (requiredSteps.length > 0) {
+        const tool = this.selectCodeGraphToolByKind(allTools, requiredSteps[0].toolKind);
+        if (tool) essentialTools.push(tool);
+      }
+      
+      // Add a generic search/explore if not already there and limit is not reached
+      if (essentialTools.length < config.maxToolsRound0) {
+        const explore = this.selectCodeGraphToolByKind(allTools, 'explore');
+        if (explore && !essentialTools.includes(explore)) essentialTools.push(explore);
+      }
+      
+      if (essentialTools.length > 0) {
+        return {
+          tools: essentialTools.map(t => this.toChatTool(t)),
+          toolMode: vscode.LanguageModelChatToolMode.Auto,
+        };
+      }
+    }
+
     const requiredSteps = WORKFLOW_DEFINITIONS[intent.workflow].toolPlan.filter((step) => step.required);
     const requiredKind = requiredSteps[round]?.toolKind;
     if (requiredKind) {
@@ -215,9 +324,12 @@ export class CodeGraphAgentParticipant {
     intent: WorkflowIntent,
     modelId?: string,
   ): vscode.LanguageModelChatMessage[] {
-    const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
-    const instructions = this.buildInstructions(intent);
+    const config = chatOptimizationManager.getConfig();
     const historyWindow = chatContext.history.slice(-8);
+    const isFollowUp = historyWindow.length > 0;
+    
+    const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
+    const instructions = this.buildInstructions(intent, isFollowUp);
     const optimizedPrompt = this.buildOptimizedPrompt({
       instructions,
       requestPrompt: request.prompt,
@@ -258,12 +370,24 @@ export class CodeGraphAgentParticipant {
     historyTurnLimitUsed: number;
     historyCharsPerTurnUsed: number;
   } {
-    const recentHistory = input.history.slice(-8);
-    const enabled = input.tokenSettings.enabled;
+    const config = chatOptimizationManager.getConfig();
+    const enabled = input.tokenSettings.enabled && config.enableSmartHistory;
+    
+    // Phase 3: Smart History Management
+    let recentHistory = input.history;
+    if (enabled && config.historyRelevanceFiltering) {
+      recentHistory = recentHistory.filter(turn => {
+        if (turn instanceof vscode.ChatRequestTurn) {
+          return turn.prompt.includes('@CodeBrain') || turn.command !== undefined;
+        }
+        return true; // Keep assistant responses for context
+      });
+    }
+
     const maxHistoryTurns = enabled
-      ? Math.min(input.tokenSettings.historyTurnLimit, recentHistory.length)
+      ? Math.min(config.maxHistoryTurns, recentHistory.length)
       : recentHistory.length;
-    const maxCharsPerTurn = enabled ? input.tokenSettings.historyCharsPerTurn : 1600;
+    const maxCharsPerTurn = enabled ? config.historyCharsPerTurn : 1600;
     const minCharsPerTurn = enabled
       ? Math.max(120, Math.floor(input.tokenSettings.historyCharsPerTurn / 3))
       : maxCharsPerTurn;
@@ -386,7 +510,10 @@ export class CodeGraphAgentParticipant {
     intent: WorkflowIntent,
     selectedTools: vscode.LanguageModelToolInformation[],
   ): Promise<vscode.ChatResult> {
+    const startTime = Date.now();
     const messages = this.buildInitialMessages(request, chatContext, intent, model.id);
+    const state = this.getOrCreateState(request);
+    let totalToolCalls = 0;
 
     for (let round = 0; round < MAX_TOOL_CALL_ROUNDS; round += 1) {
       const toolSelection = this.selectToolsForRound(selectedTools, intent, request, round);
@@ -415,13 +542,34 @@ export class CodeGraphAgentParticipant {
         if (text.trim()) {
           stream.markdown(text);
         }
+        
+        // Record metrics
+        chatMetricsCollector.recordMetric({
+          tokensSaved: 0, // Should calculate based on optimization logic
+          tokensUsed: estimateTokens(messages.map(m => String(m)).join(''), model.id).tokens,
+          responseTimeMs: Date.now() - startTime,
+          cacheHits: 0,
+          cacheMisses: 1,
+          toolCallsCount: totalToolCalls,
+          roundCount: round,
+          workflow: intent.workflow,
+        });
+        
         return {};
       }
 
+      totalToolCalls += toolCalls.length;
       messages.push(vscode.LanguageModelChatMessage.Assistant([...textParts, ...toolCalls]));
       const toolResults = await Promise.all(
         toolCalls.map((toolCall) => this.invokeToolForModel(toolCall, request, token)),
       );
+      
+      // Phase 4: Stateful Tracking
+      toolResults.forEach(res => {
+        const text = res.content.filter(c => c instanceof vscode.LanguageModelTextPart).map(c => (c as vscode.LanguageModelTextPart).value).join(' ');
+        if (text.length > 0) state.toolResultSummary.push(text.slice(0, 100)); // Keep short summaries
+      });
+
       messages.push(vscode.LanguageModelChatMessage.User(toolResults));
     }
 
@@ -483,6 +631,33 @@ export class CodeGraphAgentParticipant {
     return { metadata: { handledBy: 'intentClarification', intent } };
   }
 
+  private maybeHandleReviewSlashCommand(
+    request: vscode.ChatRequest,
+    intent: WorkflowIntent,
+    stream: vscode.ChatResponseStream,
+  ): vscode.ChatResult | undefined {
+    const prompt = request.prompt.trim();
+    const isReviewSlashCommand = /^\/review\b/iu.test(prompt);
+    if (!isReviewSlashCommand || intent.workflow !== 'review') {
+      return undefined;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!isInsideGitWorkTree(workspaceRoot)) {
+      stream.markdown('CodeBrain skipped `/review` because this workspace is not a Git repository.');
+      return { metadata: { handledBy: 'reviewSlashRedirectSkippedNoGit' } };
+    }
+
+    if (!hasWorkingTreeDiff(workspaceRoot)) {
+      stream.markdown('CodeBrain skipped `/review` because no git diff was found in the working tree.');
+      return { metadata: { handledBy: 'reviewSlashRedirectSkippedNoDiff' } };
+    }
+
+    void vscode.commands.executeCommand('codebrain.prReview');
+    stream.markdown('Opening CodeBrain review flow...');
+    return { metadata: { handledBy: 'reviewSlashRedirectedToPrReview' } };
+  }
+
   getHandler(): vscode.ChatRequestHandler {
     return async (request, chatContext, stream, token): Promise<vscode.ChatResult> => {
       const empty = this.maybeHandleEmptyRequest(request, stream);
@@ -494,6 +669,11 @@ export class CodeGraphAgentParticipant {
       const clarification = this.maybeHandleClarification(intent, stream);
       if (clarification) {
         return clarification;
+      }
+
+      const reviewRedirect = this.maybeHandleReviewSlashCommand(request, intent, stream);
+      if (reviewRedirect) {
+        return reviewRedirect;
       }
 
       const model = await this.resolveModel(request);
@@ -544,6 +724,18 @@ export class CodeGraphAgentParticipant {
       ],
     };
   }
+
+  getOptimizationConfig() {
+    return chatOptimizationManager.getConfig();
+  }
+
+  updateOptimizationConfig(updates: any) {
+    chatOptimizationManager.updateConfig(updates);
+  }
+
+  getOptimizationMetrics() {
+    return chatMetricsCollector.getAggregatedMetrics();
+  }
 }
 
 export const createCodeGraphParticipant = (
@@ -552,6 +744,6 @@ export const createCodeGraphParticipant = (
   const agent = new CodeGraphAgentParticipant(context);
   const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, agent.getHandler());
   participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.png');
-  participant.followupProvider = agent.getFollowupProvider();
+  // participant.followupProvider = agent.getFollowupProvider();
   return participant;
 };
