@@ -415,6 +415,15 @@ export class CodeGraphAgentParticipant {
         const explore = this.selectCodeGraphToolByKind(allTools, 'explore');
         if (explore && !essentialTools.includes(explore)) essentialTools.push(explore);
       }
+
+      // Add supplemental tools (e.g. Jira, Atlassian) in round 0 so LLM can fetch requirements early
+      const hints = WORKFLOW_DEFINITIONS[intent.workflow].supplementalMcpToolHints ?? [];
+      if (hints.length > 0) {
+        const supps = allTools.filter(
+          (t) => !this.isCodeGraphTool(t) && !this.isCodeBrainTool(t) && this.toolMatchesAnyHint(t, hints)
+        );
+        essentialTools.push(...supps);
+      }
       
       if (essentialTools.length > 0) {
         const tools = this.dedupeTools(essentialTools).slice(0, config.maxToolsTotal);

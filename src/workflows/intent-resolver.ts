@@ -185,6 +185,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       { toolKind: 'explore', purpose: 'Retrieve compact source context for the target flow.', required: true },
       { toolKind: 'callers', purpose: 'Confirm direct entry points for the explained symbol.', required: false },
       { toolKind: 'callees', purpose: 'Confirm direct dependencies for the explained symbol.', required: false },
+      { toolKind: 'node', purpose: 'Fetch exact symbol body only if explore trimmed necessary details.', required: false },
     ],
     producesAgentTask: false,
   },
@@ -360,9 +361,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'Balanced mode: keep target symbol, key callers/callees, and concise context needed for a valid diagram model.',
     promptConstructionStrategy:
       'Produce diagram-ready output grounded in CodeGraph evidence, including a Mermaid snippet suitable for markdown preview.',
-    outputSchema: [
-      'Mermaid Draft',
-    ],
+    outputSchema: [],
     exampleConversation: [
       'User: @CodeBrain /diagram AuthService.login',
       'CodeBrain: resolves target, pulls callers/callees/explore context, then returns a Mermaid fenced code block.',
@@ -496,7 +495,7 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
     2,
   );
 
-  return [
+  const promptParts = [
     'CodeBrain v2.0 workflow contract:',
     'You are CodeBrain, a repository-aware AI workflow orchestration and context optimization layer.',
     'Positioning: CodeGraph is the repository intelligence engine. GitHub Copilot is the reasoning and agent execution engine. CodeBrain orchestrates workflow resolution, graph retrieval, context optimization, and agent task generation.',
@@ -506,7 +505,6 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
     `Resolved intent:\n${intentJson}`,
     '',
     `Workflow: ${definition.label} (${definition.slashCommand})`,
-    `Intent parsing strategy: ${definition.intentParsingStrategy}`,
     `Context mode: ${intent.contextMode}`,
     '',
     'Graph query plan:',
@@ -541,13 +539,17 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
           '- Keep the answer workflow-shaped: Context -> Findings -> Impact/Risk when relevant -> Action/Agent Task -> Self-check.',
           ...diagramDslRequirement,
         ]),
-    '',
-    'Expected output schema:',
-    ...definition.outputSchema.map((section) => `- ${section}`),
-    '',
-    'Example conversation:',
-    ...definition.exampleConversation.map((line) => `- ${line}`),
-  ].join('\n');
+  ];
+
+  if (intent.workflow !== 'diagram') {
+    promptParts.push(
+      '',
+      'Expected output schema:',
+      ...definition.outputSchema.map((section) => `- ${section}`)
+    );
+  }
+
+  return promptParts.join('\n');
 }
 
 export function buildClarificationMarkdown(prompt: string): string {

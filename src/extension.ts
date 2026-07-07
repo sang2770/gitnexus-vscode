@@ -62,7 +62,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = getOutputChannel();
   initializeCodeBrainRuntime(context.globalStorageUri.fsPath);
   configureReportPanel(context.extensionUri);
-  void ensureMarkdownMermaidExtensionInstalled();
+  // void ensureMarkdownMermaidExtensionInstalled();
 
   context.subscriptions.push(registerCodeGraphMcpProvider(context));
   const statusBar = new CodeBrainStatusBar();
