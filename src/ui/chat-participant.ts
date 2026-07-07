@@ -1,4 +1,12 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  ContextAnalysisService,
+  extractContextFilesFromText,
+  formatContextAnalysisMarkdown,
+  isContextReportEnabled,
+} from '../process/context-analysis.js';
 import { getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
 import { hasWorkingTreeDiff, isInsideGitWorkTree } from '../process/review-git.js';
 import {
@@ -16,8 +24,11 @@ import {
   resolveWorkflowIntent,
   type WorkflowIntent,
   WORKFLOW_DEFINITIONS,
+  type CodeBrainWorkflowKind,
+  type IntentTargetType,
 } from '../workflows/intent-resolver.js';
 import { chatOptimizationManager } from './chat-optimization-config.js';
+import { buildFallbackMermaidMarkdown, extractMermaidMarkdownFromResponse, writeDiagramPreviewFile } from './diagram-generation.js';
 import { chatMetricsCollector } from './chat-metrics.js';
 
 interface ConversationState {
@@ -28,8 +39,28 @@ interface ConversationState {
   lastUpdate: number;
 }
 
+type AssistantReplayPart =
+  | vscode.LanguageModelTextPart
+  | vscode.LanguageModelToolCallPart
+  | vscode.LanguageModelDataPart;
+
+interface GroundedToolResult {
+  kind: CodeGraphToolKind;
+  toolName: string;
+  text: string;
+}
+
 const PARTICIPANT_ID = 'codebrain.codegraph';
 const MAX_TOOL_CALL_ROUNDS = 5;
+const CONTEXT_REPORT_WORKFLOWS = new Set<WorkflowIntent['workflow']>([
+  'architecture',
+  'explain',
+  'impact',
+  'review',
+  'test',
+  'detect_change',
+  'plan',
+]);
 
 const CODEGRAPH_TOOL_HINTS = ['codegraph'];
 
@@ -44,9 +75,26 @@ const TOOL_ALIASES: Record<CodeGraphToolKind, string[]> = {
   status: ['status'],
 };
 
+function getTargetType(target: string | undefined | null, workflow: string): IntentTargetType {
+  if (!target) {
+    return 'unknown';
+  }
+  if (workflow === 'review' || workflow === 'detect_change') {
+    return 'diff';
+  }
+  if (target.includes('.') || target.includes('::') || /^[A-Z]/.test(target)) {
+    return 'symbol';
+  }
+  if (target.includes('/') || target.includes('\\')) {
+    return 'file';
+  }
+  return 'task';
+}
+
 export class CodeGraphAgentParticipant {
   private conversationStates = new Map<string, ConversationState>();
   private instructionCache = new Map<string, { instructions: string, timestamp: number }>();
+  private readonly contextAnalysisService = new ContextAnalysisService();
   private lastCleanup = Date.now();
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -93,6 +141,94 @@ export class CodeGraphAgentParticipant {
       ...intent,
       contextMode: tokenSettings.effectiveMode,
     };
+  }
+
+  private async resolveIntentWithAI(
+    request: vscode.ChatRequest,
+    model: vscode.LanguageModelChat,
+    token: vscode.CancellationToken,
+  ): Promise<WorkflowIntent | undefined> {
+    const workspaceRoot = getWorkspaceRoot();
+    const editorContext = getEditorIntentContext(workspaceRoot);
+    
+    const classificationPrompt = [
+      'You are an intent classifier for CodeBrain, a repository-aware AI coding assistant.',
+      'Your task is to classify the user\'s request into one of the following workflows and extract the target symbol, file, or task description.',
+      '',
+      'Available workflows:',
+      '- "architecture": Explain repository architecture, module map, or onboarding.',
+      '- "explain": Explain a symbol (class, function), execution flow, or file.',
+      '- "impact": Analyze the impact, blast radius, callers, or callees of a specific symbol.',
+      '- "review": Review current git changes, PRs, or diffs.',
+      '- "detect_change": Detect impact/risk of pending changes in the working tree.',
+      '- "test": Generate a test plan or test cases for a symbol or behavior.',
+      '- "diagram": Generate a Mermaid flow diagram, sequence diagram, or chart for a symbol or flow.',
+      '- "plan": Generate an implementation plan, fix plan, or task for a bug, feature, or Jira ticket.',
+      '',
+      'Editor context details:',
+      `- Active file: ${editorContext.relativeFilePath ?? 'None'}`,
+      `- Selected symbol: ${editorContext.selectedSymbol ?? 'None'}`,
+      `- Cursor symbol: ${editorContext.cursorSymbol ?? 'None'}`,
+      `- Selected text: ${editorContext.selectedText ?? 'None'}`,
+      '',
+      `User request: "${request.prompt}"`,
+      '',
+      'Respond with a JSON object matching this schema:',
+      '{',
+      '  "workflow": "architecture" | "explain" | "impact" | "review" | "detect_change" | "test" | "diagram" | "plan",',
+      '  "target": "string or null"',
+      '}',
+      'Provide only the JSON object, without any markdown block wrapper or extra text.'
+    ].join('\n');
+
+    try {
+      const response = await model.sendRequest(
+        [vscode.LanguageModelChatMessage.User(classificationPrompt)],
+        { justification: 'CodeBrain intent classification' },
+        token,
+      );
+
+      let text = '';
+      for await (const part of response.stream) {
+        if (part instanceof vscode.LanguageModelTextPart) {
+          text += part.value;
+        }
+      }
+
+      const cleaned = text.replace(/```json|```/g, '').trim();
+      const parsed = JSON.parse(cleaned);
+      const VALID_WORKFLOWS = new Set([
+        'architecture',
+        'explain',
+        'impact',
+        'review',
+        'detect_change',
+        'test',
+        'diagram',
+        'plan',
+      ]);
+
+      if (parsed && typeof parsed.workflow === 'string' && VALID_WORKFLOWS.has(parsed.workflow)) {
+        const workflow = parsed.workflow as CodeBrainWorkflowKind;
+        const target = typeof parsed.target === 'string' ? parsed.target : undefined;
+        const targetType = getTargetType(target, workflow);
+        const tokenSettings = getTokenOptimizationSettings(WORKFLOW_DEFINITIONS[workflow].contextMode);
+
+        return {
+          workflow,
+          target,
+          targetType,
+          contextMode: tokenSettings.effectiveMode,
+          confidence: 0.9,
+          source: 'heuristic',
+          needsClarification: false,
+          rawPrompt: request.prompt,
+        };
+      }
+    } catch (error) {
+      getOutputChannel().appendLine(`[CodeBrain Chat] AI intent classification failed: ${error}`);
+    }
+    return undefined;
   }
 
   private buildInstructions(intent: WorkflowIntent, compact: boolean = false): string {
@@ -237,6 +373,12 @@ export class CodeGraphAgentParticipant {
     };
   }
 
+  private resolveAttachedTools(request: vscode.ChatRequest): vscode.LanguageModelToolInformation[] {
+    return request.toolReferences
+      .map((ref) => vscode.lm.tools.find((tool) => tool.name === ref.name))
+      .filter((tool): tool is vscode.LanguageModelToolInformation => Boolean(tool));
+  }
+
   private selectToolsForRound(
     allTools: vscode.LanguageModelToolInformation[],
     intent: WorkflowIntent,
@@ -247,6 +389,15 @@ export class CodeGraphAgentParticipant {
     toolMode?: vscode.LanguageModelChatToolMode;
   } {
     const config = chatOptimizationManager.getConfig();
+    const resolvedAttachedTools = this.resolveAttachedTools(request);
+    const attachedTools = round === 0 ? resolvedAttachedTools : [];
+
+    if (attachedTools.length > 0) {
+      return {
+        tools: this.dedupeTools(attachedTools).map((tool) => this.toChatTool(tool)),
+        toolMode: attachedTools.length === 1 ? vscode.LanguageModelChatToolMode.Required : vscode.LanguageModelChatToolMode.Auto,
+      };
+    }
     
     // Phase 2: Progressive Tool Selection
     if (config.enableProgressiveTools && round === 0) {
@@ -266,33 +417,23 @@ export class CodeGraphAgentParticipant {
       }
       
       if (essentialTools.length > 0) {
+        const tools = this.dedupeTools(essentialTools).slice(0, config.maxToolsTotal);
         return {
-          tools: essentialTools.map(t => this.toChatTool(t)),
+          tools: tools.map(t => this.toChatTool(t)),
           toolMode: vscode.LanguageModelChatToolMode.Auto,
         };
       }
     }
 
     const requiredSteps = WORKFLOW_DEFINITIONS[intent.workflow].toolPlan.filter((step) => step.required);
-    const requiredKind = requiredSteps[round]?.toolKind;
+    const workflowRound = Math.max(0, round - (resolvedAttachedTools.length > 0 ? 1 : 0));
+    const requiredKind = requiredSteps[workflowRound]?.toolKind;
     if (requiredKind) {
       const tool = this.selectCodeGraphToolByKind(allTools, requiredKind);
       if (tool) {
         return {
           tools: [this.toChatTool(tool)],
           toolMode: vscode.LanguageModelChatToolMode.Required,
-        };
-      }
-    }
-
-    if (round === 0 && request.toolReferences.length > 0) {
-      const attached = request.toolReferences
-        .map((ref) => vscode.lm.tools.find((tool) => tool.name === ref.name))
-        .filter((tool): tool is vscode.LanguageModelToolInformation => Boolean(tool && this.isCodeGraphTool(tool)));
-      if (attached.length > 0) {
-        return {
-          tools: attached.map((tool) => this.toChatTool(tool)),
-          toolMode: attached.length === 1 ? vscode.LanguageModelChatToolMode.Required : vscode.LanguageModelChatToolMode.Auto,
         };
       }
     }
@@ -318,12 +459,22 @@ export class CodeGraphAgentParticipant {
     return models[0];
   }
 
-  private buildInitialMessages(
+  private shouldUseTextToolContext(model: vscode.LanguageModelChat): boolean {
+    const haystack = [
+      model.vendor,
+      model.family,
+      model.id,
+      model.name,
+    ].join(' ').toLowerCase();
+    return haystack.includes('gemini') || haystack.includes('google');
+  }
+
+  private buildInitialPrompt(
     request: vscode.ChatRequest,
     chatContext: vscode.ChatContext,
     intent: WorkflowIntent,
     modelId?: string,
-  ): vscode.LanguageModelChatMessage[] {
+  ): string {
     const config = chatOptimizationManager.getConfig();
     const historyWindow = chatContext.history.slice(-8);
     const isFollowUp = historyWindow.length > 0;
@@ -356,7 +507,7 @@ export class CodeGraphAgentParticipant {
       modelId,
     );
 
-    return [vscode.LanguageModelChatMessage.User(prompt)];
+    return prompt;
   }
 
   private buildOptimizedPrompt(input: {
@@ -501,6 +652,223 @@ export class CodeGraphAgentParticipant {
     }
   }
 
+  private async invokeCodeGraphToolForContext(
+    tool: vscode.LanguageModelToolInformation,
+    kind: CodeGraphToolKind,
+    intent: WorkflowIntent,
+    request: vscode.ChatRequest,
+    token: vscode.CancellationToken,
+  ): Promise<GroundedToolResult> {
+    const result = await vscode.lm.invokeTool(
+      tool.name,
+      {
+        input: this.buildCodeGraphToolInput(kind, intent, request),
+        toolInvocationToken: request.toolInvocationToken,
+      },
+      token,
+    );
+
+    return {
+      kind,
+      toolName: tool.name,
+      text: this.getToolResultContentText(result.content),
+    };
+  }
+
+  private buildCodeGraphToolInput(
+    kind: CodeGraphToolKind,
+    intent: WorkflowIntent,
+    request: vscode.ChatRequest,
+  ): Record<string, unknown> {
+    const workspaceRoot = getWorkspaceRoot();
+    const target = intent.target ?? (request.prompt.trim() || 'current workspace');
+    const query = [intent.target, request.prompt.trim()].filter(Boolean).join('\n') || target;
+
+    switch (kind) {
+      case 'status':
+        return { projectPath: workspaceRoot };
+      case 'files':
+        return { format: 'tree', maxDepth: 4, projectPath: workspaceRoot };
+      case 'explore':
+        return { query, maxFiles: intent.contextMode === 'full' ? 12 : 8, projectPath: workspaceRoot };
+      case 'search':
+        return { query: target, limit: 12, projectPath: workspaceRoot };
+      case 'callers':
+      case 'callees':
+        return { symbol: target, limit: 20, projectPath: workspaceRoot };
+      case 'impact':
+        return { symbol: target, depth: 2, projectPath: workspaceRoot };
+      case 'node':
+        return { symbol: target, includeCode: true, projectPath: workspaceRoot };
+    }
+  }
+
+  private isReplayableAssistantPart(part: unknown): part is AssistantReplayPart {
+    return part instanceof vscode.LanguageModelTextPart ||
+      part instanceof vscode.LanguageModelToolCallPart ||
+      (part instanceof vscode.LanguageModelDataPart && this.isReplayableDataPart(part));
+  }
+
+  private isReplayableDataPart(part: vscode.LanguageModelDataPart): boolean {
+    return part.mimeType.toLowerCase() !== 'usage';
+  }
+
+  private getToolResultText(result: vscode.LanguageModelToolResultPart): string {
+    return this.getToolResultContentText(result.content);
+  }
+
+  private getToolResultContentText(content: Array<vscode.LanguageModelTextPart | vscode.LanguageModelPromptTsxPart | vscode.LanguageModelDataPart | unknown>): string {
+    const decoder = new TextDecoder();
+    return content
+      .map((part) => {
+        if (part instanceof vscode.LanguageModelTextPart) {
+          return part.value;
+        }
+        if (part instanceof vscode.LanguageModelDataPart && part.mimeType.startsWith('text/')) {
+          return decoder.decode(part.data);
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private async appendContextAnalysisReport(input: {
+    stream: vscode.ChatResponseStream;
+    intent: WorkflowIntent;
+    optimizedContext: string;
+    toolResultTexts: string[];
+  }): Promise<void> {
+    if (!isContextReportEnabled() || !CONTEXT_REPORT_WORKFLOWS.has(input.intent.workflow)) {
+      return;
+    }
+
+    try {
+      const selectedFiles = Array.from(new Set(input.toolResultTexts.flatMap(extractContextFilesFromText))).sort();
+      const report = await this.contextAnalysisService.generateReport({
+        workspaceRoot: getWorkspaceRoot(),
+        optimizedContext: input.optimizedContext,
+        selectedFiles,
+      });
+
+      input.stream.markdown(`\n\n${formatContextAnalysisMarkdown(report)}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      getOutputChannel().appendLine(`[CodeBrain Chat] Context analysis report failed: ${message}`);
+    }
+  }
+
+  private async sendGroundedModelRequest(
+    request: vscode.ChatRequest,
+    chatContext: vscode.ChatContext,
+    stream: vscode.ChatResponseStream,
+    token: vscode.CancellationToken,
+    model: vscode.LanguageModelChat,
+    intent: WorkflowIntent,
+    selectedTools: vscode.LanguageModelToolInformation[],
+    diagramType?: string,
+  ): Promise<vscode.ChatResult> {
+    const startTime = Date.now();
+    let initialPrompt = this.buildInitialPrompt(request, chatContext, intent, model.id);
+    if (intent.workflow === 'diagram' && diagramType) {
+      initialPrompt += `\n\nMandatory Requirement: Generate exactly one fenced code block using \`\`\`mermaid of type: **${diagramType}**.`;
+    }
+    const toolResults = await this.collectGroundingToolResults(selectedTools, intent, request, token);
+    const toolResultTexts = toolResults.map((result) => result.text).filter((text) => text.trim().length > 0);
+    const groundedPrompt = [
+      initialPrompt,
+      '',
+      'CodeBrain MCP tool results:',
+      toolResults.length > 0
+        ? toolResults.map((result) => [
+            `Tool: ${result.toolName}`,
+            `Kind: ${result.kind}`,
+            result.text || '(no text result)',
+          ].join('\n')).join('\n\n')
+        : 'No CodeGraph tools were available for this workflow.',
+      '',
+      'Use the MCP tool results above as the repository evidence. Answer now without requesting tool calls.',
+    ].join('\n');
+
+    const response = await model.sendRequest(
+      [vscode.LanguageModelChatMessage.User(groundedPrompt)],
+      { justification: `CodeBrain grounded workflow: ${WORKFLOW_DEFINITIONS[intent.workflow].slashCommand}` },
+      token,
+    );
+
+    let text = '';
+    for await (const part of response.stream) {
+      if (part instanceof vscode.LanguageModelTextPart) {
+        text += part.value;
+      }
+    }
+
+    const finalText = text.trim() || 'CodeBrain gathered CodeGraph results but did not receive a final answer.';
+    if (intent.workflow === 'diagram') {
+      const markdown = extractMermaidMarkdownFromResponse(finalText) ?? buildFallbackMermaidMarkdown(intent.target);
+      const filePath = await writeDiagramPreviewFile(markdown, intent.target);
+      const fileUri = vscode.Uri.file(filePath);
+      stream.markdown(`### CodeBrain Diagram\n\nGenerated diagram for \`${intent.target ?? 'target'}\` successfully.\n\n- **Preview File:** [${path.basename(filePath)}](${fileUri.toString()})\n\n*(The preview file has been opened automatically)*`);
+      await vscode.commands.executeCommand('vscode.open', fileUri);
+    } else {
+      stream.markdown(finalText);
+      await this.maybeCreateDiagramPreviewFromResponse(intent, finalText, stream);
+    }
+    await this.appendContextAnalysisReport({
+      stream,
+      intent,
+      optimizedContext: toolResultTexts.join('\n\n') || finalText,
+      toolResultTexts,
+    });
+
+    chatMetricsCollector.recordMetric({
+      tokensSaved: 0,
+      tokensUsed: estimateTokens(groundedPrompt, model.id).tokens,
+      responseTimeMs: Date.now() - startTime,
+      cacheHits: 0,
+      cacheMisses: 1,
+      toolCallsCount: toolResults.length,
+      roundCount: 1,
+      workflow: intent.workflow,
+    });
+
+    return {};
+  }
+
+  private async collectGroundingToolResults(
+    selectedTools: vscode.LanguageModelToolInformation[],
+    intent: WorkflowIntent,
+    request: vscode.ChatRequest,
+    token: vscode.CancellationToken,
+  ): Promise<GroundedToolResult[]> {
+    const requiredKinds = WORKFLOW_DEFINITIONS[intent.workflow].toolPlan
+      .filter((step) => step.required)
+      .map((step) => step.toolKind);
+    const toolKinds = requiredKinds.length > 0 ? requiredKinds : WORKFLOW_DEFINITIONS[intent.workflow].mcpToolsRequired.slice(0, 2);
+    const results: GroundedToolResult[] = [];
+
+    for (const kind of toolKinds) {
+      const tool = this.selectCodeGraphToolByKind(selectedTools, kind);
+      if (!tool) {
+        continue;
+      }
+
+      try {
+        results.push(await this.invokeCodeGraphToolForContext(tool, kind, intent, request, token));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        getOutputChannel().appendLine(`[CodeBrain Chat] Grounding tool ${tool.name} failed: ${message}`);
+        results.push({
+          kind,
+          toolName: tool.name,
+          text: `Tool ${tool.name} failed: ${message}`,
+        });
+      }
+    }
+
+    return results;
+  }
+
   private async sendModelRequest(
     request: vscode.ChatRequest,
     chatContext: vscode.ChatContext,
@@ -509,10 +877,20 @@ export class CodeGraphAgentParticipant {
     model: vscode.LanguageModelChat,
     intent: WorkflowIntent,
     selectedTools: vscode.LanguageModelToolInformation[],
+    diagramType?: string,
   ): Promise<vscode.ChatResult> {
+    if (this.shouldUseTextToolContext(model)) {
+      return this.sendGroundedModelRequest(request, chatContext, stream, token, model, intent, selectedTools, diagramType);
+    }
+
     const startTime = Date.now();
-    const messages = this.buildInitialMessages(request, chatContext, intent, model.id);
+    let initialPrompt = this.buildInitialPrompt(request, chatContext, intent, model.id);
+    if (intent.workflow === 'diagram' && diagramType) {
+      initialPrompt += `\n\nMandatory Requirement: Generate exactly one fenced code block using \`\`\`mermaid of type: **${diagramType}**.`;
+    }
+    const messages = [vscode.LanguageModelChatMessage.User(initialPrompt)];
     const state = this.getOrCreateState(request);
+    const toolResultContextParts: string[] = [];
     let totalToolCalls = 0;
 
     for (let round = 0; round < MAX_TOOL_CALL_ROUNDS; round += 1) {
@@ -527,21 +905,40 @@ export class CodeGraphAgentParticipant {
         token,
       );
 
-      const textParts: vscode.LanguageModelTextPart[] = [];
+      const responseParts: AssistantReplayPart[] = [];
       const toolCalls: vscode.LanguageModelToolCallPart[] = [];
       for await (const part of response.stream) {
-        if (part instanceof vscode.LanguageModelTextPart) {
-          textParts.push(part);
-        } else if (part instanceof vscode.LanguageModelToolCallPart) {
+        if (this.isReplayableAssistantPart(part)) {
+          responseParts.push(part);
+        }
+        if (part instanceof vscode.LanguageModelToolCallPart) {
           toolCalls.push(part);
         }
       }
 
       if (toolCalls.length === 0) {
-        const text = textParts.map((part) => part.value).join('');
-        if (text.trim()) {
-          stream.markdown(text);
+        const text = responseParts
+          .filter((part) => part instanceof vscode.LanguageModelTextPart)
+          .map((part) => part.value)
+          .join('');
+        if (intent.workflow === 'diagram') {
+          const markdown = extractMermaidMarkdownFromResponse(text) ?? buildFallbackMermaidMarkdown(intent.target);
+          const filePath = await writeDiagramPreviewFile(markdown, intent.target);
+          const fileUri = vscode.Uri.file(filePath);
+          stream.markdown(`### CodeBrain Diagram\n\nGenerated diagram for \`${intent.target ?? 'target'}\` successfully.\n\n- **Preview File:** [${path.basename(filePath)}](${fileUri.toString()})\n\n*(The preview file has been opened automatically)*`);
+          await vscode.commands.executeCommand('vscode.open', fileUri);
+        } else {
+          if (text.trim()) {
+            stream.markdown(text);
+          }
+          await this.maybeCreateDiagramPreviewFromResponse(intent, text, stream);
         }
+        await this.appendContextAnalysisReport({
+          stream,
+          intent,
+          optimizedContext: toolResultContextParts.join('\n\n') || text,
+          toolResultTexts: toolResultContextParts,
+        });
         
         // Record metrics
         chatMetricsCollector.recordMetric({
@@ -559,14 +956,15 @@ export class CodeGraphAgentParticipant {
       }
 
       totalToolCalls += toolCalls.length;
-      messages.push(vscode.LanguageModelChatMessage.Assistant([...textParts, ...toolCalls]));
+      messages.push(vscode.LanguageModelChatMessage.Assistant(responseParts));
       const toolResults = await Promise.all(
         toolCalls.map((toolCall) => this.invokeToolForModel(toolCall, request, token)),
       );
+      const toolResultTexts = toolResults.map((result) => this.getToolResultText(result)).filter((text) => text.trim().length > 0);
+      toolResultContextParts.push(...toolResultTexts);
       
       // Phase 4: Stateful Tracking
-      toolResults.forEach(res => {
-        const text = res.content.filter(c => c instanceof vscode.LanguageModelTextPart).map(c => (c as vscode.LanguageModelTextPart).value).join(' ');
+      toolResultTexts.forEach(text => {
         if (text.length > 0) state.toolResultSummary.push(text.slice(0, 100)); // Keep short summaries
       });
 
@@ -588,7 +986,23 @@ export class CodeGraphAgentParticipant {
         text += part.value;
       }
     }
-    stream.markdown(text.trim() || 'CodeBrain gathered CodeGraph results but did not receive a final answer.');
+    const finalText = text.trim() || 'CodeBrain gathered CodeGraph results but did not receive a final answer.';
+    if (intent.workflow === 'diagram') {
+      const markdown = extractMermaidMarkdownFromResponse(finalText) ?? buildFallbackMermaidMarkdown(intent.target);
+      const filePath = await writeDiagramPreviewFile(markdown, intent.target);
+      const fileUri = vscode.Uri.file(filePath);
+      stream.markdown(`### CodeBrain Diagram\n\nGenerated diagram for \`${intent.target ?? 'target'}\` successfully.\n\n- **Preview File:** [${path.basename(filePath)}](${fileUri.toString()})\n\n*(The preview file has been opened automatically)*`);
+      await vscode.commands.executeCommand('vscode.open', fileUri);
+    } else {
+      stream.markdown(finalText);
+      await this.maybeCreateDiagramPreviewFromResponse(intent, finalText, stream);
+    }
+    await this.appendContextAnalysisReport({
+      stream,
+      intent,
+      optimizedContext: toolResultContextParts.join('\n\n') || finalText,
+      toolResultTexts: toolResultContextParts,
+    });
     return {};
   }
 
@@ -606,6 +1020,7 @@ export class CodeGraphAgentParticipant {
       '`@CodeBrain /impact UserService.authenticate`',
       '`@CodeBrain /review`',
       '`@CodeBrain /test AuthService.login`',
+      '`@CodeBrain /diagram AuthService.login`',
       '`@CodeBrain /plan ABC-123 implement checkout timeout fix from the linked collab doc`',
     ];
 
@@ -628,7 +1043,30 @@ export class CodeGraphAgentParticipant {
     stream.button({ command: 'codebrain.workflow.review', title: 'Review Changes' });
     stream.button({ command: 'codebrain.workflow.plan', title: 'Generate Plan' });
     stream.button({ command: 'codebrain.workflow.test', title: 'Generate Test Plan' });
+    stream.button({ command: 'codebrain.generateFlowDiagram', title: 'Generate Diagram' });
     return { metadata: { handledBy: 'intentClarification', intent } };
+  }
+
+  private async maybeCreateDiagramPreviewFromResponse(
+    intent: WorkflowIntent,
+    responseText: string,
+    stream: vscode.ChatResponseStream,
+  ): Promise<void> {
+    if (intent.workflow !== 'diagram') {
+      return;
+    }
+
+    try {
+      const markdown = extractMermaidMarkdownFromResponse(responseText) ?? buildFallbackMermaidMarkdown(intent.target);
+      const filePath = await writeDiagramPreviewFile(markdown, intent.target);
+
+      stream.markdown(`\n\nDiagram preview file created: ${filePath}`);
+      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      getOutputChannel().appendLine(`[CodeBrain Chat] Failed to create diagram preview file: ${message}`);
+      stream.markdown(`\n\nCould not create diagram preview file automatically: ${message}`);
+    }
   }
 
   private maybeHandleReviewSlashCommand(
@@ -665,7 +1103,22 @@ export class CodeGraphAgentParticipant {
         return empty;
       }
 
-      const intent = this.resolveIntent(request);
+      let intent = this.resolveIntent(request);
+
+      const model = await this.resolveModel(request);
+      if (!model) {
+        const message = 'No language model available. Ensure GitHub Copilot is signed in and active.';
+        stream.markdown(message);
+        return { errorDetails: { message } };
+      }
+
+      if (intent.needsClarification) {
+        const aiIntent = await this.resolveIntentWithAI(request, model, token);
+        if (aiIntent) {
+          intent = aiIntent;
+        }
+      }
+
       const clarification = this.maybeHandleClarification(intent, stream);
       if (clarification) {
         return clarification;
@@ -676,11 +1129,28 @@ export class CodeGraphAgentParticipant {
         return reviewRedirect;
       }
 
-      const model = await this.resolveModel(request);
-      if (!model) {
-        const message = 'No language model available. Ensure GitHub Copilot is signed in and active.';
-        stream.markdown(message);
-        return { errorDetails: { message } };
+      let diagramType: string | undefined;
+      if (intent.workflow === 'diagram') {
+        const selectedType = await vscode.window.showQuickPick(
+          [
+            { label: '$(git-branch) Flowchart (Left to Right)', value: 'Flowchart LR', description: 'flowchart LR' },
+            { label: '$(git-commit) Flowchart (Top Down)', value: 'Flowchart TD', description: 'flowchart TD' },
+            { label: '$(symbol-interface) Sequence Diagram', value: 'Sequence Diagram', description: 'sequenceDiagram' },
+            { label: '$(symbol-class) Class Diagram', value: 'Class Diagram', description: 'classDiagram' },
+            { label: '$(symbol-event) State Diagram', value: 'State Diagram', description: 'stateDiagram' },
+            { label: '$(symbol-module) C4 Diagram', value: 'C4 Diagram', description: 'C4Context' },
+          ],
+          {
+            placeHolder: 'Select the type of diagram to generate',
+            ignoreFocusOut: true,
+          }
+        );
+
+        if (!selectedType) {
+          stream.markdown('Cancelled diagram generation.');
+          return {};
+        }
+        diagramType = selectedType.value;
       }
 
       try {
@@ -692,6 +1162,7 @@ export class CodeGraphAgentParticipant {
           model,
           intent,
           this.selectToolsForIntent(intent),
+          diagramType,
         );
       } catch (error) {
         if (token.isCancellationRequested) {
@@ -720,6 +1191,7 @@ export class CodeGraphAgentParticipant {
         { prompt: '/architecture current workspace', label: 'Explain architecture' },
         { prompt: '/impact selected symbol', label: 'Analyze impact' },
         { prompt: '/review', label: 'Review changes' },
+        { prompt: '/diagram selected symbol', label: 'Generate diagram' },
         { prompt: '/plan selected symbol', label: 'Generate plan' },
       ],
     };

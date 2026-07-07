@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { ContextAnalysisReport } from '../process/context-analysis.js';
 import { getWorkspaceRoot } from '../process/cli-runner.js';
 import {
   createTokenReductionReport,
@@ -164,6 +165,13 @@ export function showQueryReport(
   });
 }
 
+export function showContextAnalysisReport(title: string, report: ContextAnalysisReport): void {
+  showReportPanel({
+    title: 'Context Analysis',
+    html: buildContextAnalysisHtml(title, report),
+  });
+}
+
 function showReportPanel(input: { title: string; html: string; enableGraphAssets?: boolean }): void {
   if (!activePanel) {
     const webviewOptions: vscode.WebviewPanelOptions & vscode.WebviewOptions = {
@@ -316,6 +324,13 @@ function buildQueryHtml(
     buildQueryGraphSection(graph),
     buildTokenOptimizationSection(report),
     section('Raw Output', `<details><summary>CLI JSON</summary><pre>${escapeHtml(rawOutput.trim())}</pre></details>`),
+  ].join('');
+}
+
+function buildContextAnalysisHtml(title: string, report: ContextAnalysisReport): string {
+  return [
+    `<div class="hero"><div><div class="eyebrow">CodeBrain Context Analysis</div><h1>${escapeHtml(title)}</h1></div><span class="pill">${escapeHtml(report.reductionPercent.toFixed(1))}% saved</span></div>`,
+    buildContextAnalysisSection(report),
   ].join('');
 }
 
@@ -741,6 +756,31 @@ function buildTokenOptimizationSection(report: TokenReductionReport): string {
       `<details class="selected-files-details"><summary>Selected files</summary><div class="selected-files">${selected}</div></details>`,
     ].join(''),
     'token-section',
+  );
+}
+
+function buildContextAnalysisSection(report: ContextAnalysisReport): string {
+  const cards = [
+    metricCard('Repository Files', formatNumber(report.repositoryFiles)),
+    metricCard('Files Scanned', formatNumber(report.scannedFiles)),
+    metricCard('Files Selected', formatNumber(report.selectedFiles)),
+    metricCard('Raw Context', `${formatNumber(report.rawTokens)} tokens`),
+    metricCard('Optimized Context', `${formatNumber(report.optimizedTokens)} tokens`),
+    metricCard('Token Reduction', `${report.reductionPercent.toFixed(1)}%`, report.reductionPercent > 0 ? 'success' : undefined),
+  ].join('');
+  const details = [
+    detailRow('Raw characters', formatNumber(report.rawCharacters)),
+    detailRow('Optimized characters', formatNumber(report.optimizedCharacters)),
+    detailRow('Estimated cost saving', `Up to ${Math.max(0, report.reductionPercent).toFixed(1)}%`),
+  ].join('');
+
+  return section(
+    'CodeBrain Context Analysis',
+    [
+      `<div class="cards context-analysis-cards">${cards}</div>`,
+      `<div class="details context-analysis-details">${details}</div>`,
+    ].join(''),
+    'context-analysis-section',
   );
 }
 
@@ -1269,6 +1309,10 @@ section {
 
 .selected-files-details {
   margin-top: 8px;
+}
+
+.context-analysis-details {
+  margin-top: 12px;
 }
 
 summary {

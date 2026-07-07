@@ -123,6 +123,12 @@
         "icon": "$(tasklist)"
       },
       {
+        "command": "codebrain.generateFlowDiagram",
+        "title": "Generate Flow Diagram (Markdown + Mermaid)",
+        "category": "CodeBrain",
+        "icon": "$(symbol-structure)"
+      },
+      {
         "command": "codebrain.impactLens.impact",
         "title": "Impact Lens: Analyze Impact",
         "category": "CodeBrain",
@@ -223,6 +229,11 @@
           "type": "number",
           "default": 24000,
           "description": "Target token budget for full CodeBrain context."
+        },
+        "codebrain.showContextReport": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the Context Optimization Report in CodeBrain chat and the report panel for repository-aware workflows."
         }
       }
     },
@@ -318,6 +329,11 @@
           "command": "codebrain.prReview",
           "group": "codebrain@7",
           "when": "editorTextFocus"
+        },
+        {
+          "command": "codebrain.generateFlowDiagram",
+          "group": "codebrain@8",
+          "when": "editorTextFocus"
         }
       ],
       "commandPalette": [
@@ -361,6 +377,10 @@
           {
             "name": "plan",
             "description": "Generate an implementation plan using CodeGraph plus optional Jira and collab context"
+          },
+          {
+            "name": "diagram",
+            "description": "Generate a workflow diagram for the current symbol or flow"
           }
         ]
       }
@@ -396,6 +416,7 @@
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
     "sigma": "^3.0.3",
-    "strip-ansi": "^7.2.0"
+    "strip-ansi": "^7.2.0",
+    "tiktoken": "^1.0.22"
   }
 }

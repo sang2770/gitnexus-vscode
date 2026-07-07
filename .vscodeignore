@@ -16,6 +16,7 @@ node_modules
 !node_modules/graphology-layout-forceatlas2/**
 !node_modules/graphology-utils/**
 !node_modules/sigma/**
+!node_modules/tiktoken/**
 out
 *.map
 

@@ -8,6 +8,7 @@ export type CodeBrainWorkflowKind =
   | 'review'
   | 'test'
   | 'detect_change'
+  | 'diagram'
   | 'plan';
 
 export type ContextMode = 'compact' | 'balanced' | 'full';
@@ -100,6 +101,10 @@ const WORKFLOW_ALIASES: Record<string, CodeBrainWorkflowKind> = {
   detect_change: 'detect_change',
   detect_changes: 'detect_change',
   changes: 'detect_change',
+  diagram: 'diagram',
+  diagrams: 'diagram',
+  flow_diagram: 'diagram',
+  workflow_diagram: 'diagram',
   fix_plan: 'plan',
   plan: 'plan',
   implementation_plan: 'plan',
@@ -333,6 +338,43 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     ],
     producesAgentTask: false,
   },
+  diagram: {
+    kind: 'diagram',
+    slashCommand: '/diagram',
+    label: 'Diagram Workflow',
+    contextMode: 'balanced',
+    intentParsingStrategy:
+      'Slash command first, then diagram keywords; selected symbol/file scopes the diagram target.',
+    mcpToolsRequired: ['search', 'callers', 'callees', 'explore'],
+    supplementalMcpToolHints: [],
+    graphQueryPlan: [
+      'codegraph_search: resolve target symbol or query scope.',
+      'codegraph_callers: collect upstream nodes for flow edges.',
+      'codegraph_callees: collect downstream nodes for flow edges.',
+      'codegraph_explore: enrich with behavior/context when symbol resolution is broad.',
+    ],
+    supplementalContextPlan: [
+      'Use CodeGraph evidence to generate a Mermaid markdown preview that can be opened directly in VS Code.',
+    ],
+    contextOptimizationStrategy:
+      'Balanced mode: keep target symbol, key callers/callees, and concise context needed for a valid diagram model.',
+    promptConstructionStrategy:
+      'Produce diagram-ready output grounded in CodeGraph evidence, including a Mermaid snippet suitable for markdown preview.',
+    outputSchema: [
+      'Mermaid Draft',
+    ],
+    exampleConversation: [
+      'User: @CodeBrain /diagram AuthService.login',
+      'CodeBrain: resolves target, pulls callers/callees/explore context, then returns a Mermaid fenced code block.',
+    ],
+    toolPlan: [
+      { toolKind: 'search', purpose: 'Resolve a stable target for diagram generation.', required: true },
+      { toolKind: 'callers', purpose: 'Collect incoming flow edges.', required: true },
+      { toolKind: 'callees', purpose: 'Collect outgoing flow edges.', required: true },
+      { toolKind: 'explore', purpose: 'Add essential contextual flow details.', required: false },
+    ],
+    producesAgentTask: false,
+  },
   plan: {
     kind: 'plan',
     slashCommand: '/plan',
@@ -436,6 +478,11 @@ export function resolveWorkflowIntent(input: {
 
 export function buildWorkflowInstructions(intent: WorkflowIntent): string {
   const definition = WORKFLOW_DEFINITIONS[intent.workflow];
+  const diagramDslRequirement = intent.workflow === 'diagram'
+    ? [
+        '- For diagram workflow, include one fenced code block using ```mermaid with a valid Mermaid diagram.',
+      ]
+    : [];
   const intentJson = JSON.stringify(
     {
       workflow: intent.workflow,
@@ -475,16 +522,25 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
         ]
       : []),
     '',
-    'Mandatory output requirements:',
-    '- Always include a "Context Used" section.',
-    ...(definition.supplementalContextPlan?.length
-      ? ['- Always include an "External Context Used" section that names Jira/collab sources or says they were unavailable.']
-      : []),
-    '- Always include a "Why Selected" section.',
-    '- Always include a "Token Reduction" section with Files Scanned, Files Selected, estimated before/after tokens, and reduction percentage.',
-    '- If a metric is not available from CodeGraph output, write "Unknown" and state what evidence is missing. Do not invent numbers.',
-    '- Use CodeGraph tool results as evidence. Do not blindly answer from prompt text.',
-    '- Keep the answer workflow-shaped: Context -> Findings -> Impact/Risk when relevant -> Action/Agent Task -> Self-check.',
+    ...(intent.workflow === 'diagram'
+      ? [
+          'Mandatory output requirements:',
+          '- Return exactly one fenced code block using ```mermaid.',
+          '- Do not include any explanations, introduction, or other markdown headers before or after the code block.',
+        ]
+      : [
+          'Mandatory output requirements:',
+          '- Always include a "Context Used" section.',
+          ...(definition.supplementalContextPlan?.length
+            ? ['- Always include an "External Context Used" section that names Jira/collab sources or says they were unavailable.']
+            : []),
+          '- Always include a "Why Selected" section.',
+          '- Always include a "Token Reduction" section with Files Scanned, Files Selected, estimated before/after tokens, and reduction percentage.',
+          '- If a metric is not available from CodeGraph output, write "Unknown" and state what evidence is missing. Do not invent numbers.',
+          '- Use CodeGraph tool results as evidence. Do not blindly answer from prompt text.',
+          '- Keep the answer workflow-shaped: Context -> Findings -> Impact/Risk when relevant -> Action/Agent Task -> Self-check.',
+          ...diagramDslRequirement,
+        ]),
     '',
     'Expected output schema:',
     ...definition.outputSchema.map((section) => `- ${section}`),
@@ -504,6 +560,7 @@ export function buildClarificationMarkdown(prompt: string): string {
     '- Explain Flow: `/explain <symbol or area>`',
     '- Analyze Impact: `/impact <symbol>`',
     '- Review Changes: `/review`',
+    '- Generate Diagram: `/diagram <symbol or flow>`',
     '- Generate Plan: `/plan <task, issue, or collab doc>`',
     '- Generate Test Plan: `/test <symbol or behavior>`',
   ].join('\n');
@@ -554,6 +611,11 @@ function resolveHeuristicWorkflow(prompt: string, editorContext: EditorIntentCon
 
   if (/\b(detect change|detect changes|change impact|pending changes)\b/u.test(lower)) {
     return baseIntent('detect_change', 'working tree diff', 'diff', 0.78, 'git-diff', prompt);
+  }
+
+  if (/\b(diagram|flow diagram|workflow diagram|architecture diagram|sequence diagram)\b/u.test(lower)) {
+    const target = resolveTarget(prompt, 'diagram', editorContext);
+    return baseIntent('diagram', target.value, target.type, target.value ? 0.76 : 0.5, 'heuristic', prompt);
   }
 
   if (/\b(impact|blast radius|callers|callees|dependents?)\b/u.test(lower)) {

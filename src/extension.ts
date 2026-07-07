@@ -5,6 +5,7 @@ import {
   analyzeTreeItemCommand,
 } from './commands/analyze.js';
 import { cleanCommand, statusCommand } from './commands/clean.js';
+import { generateFlowDiagramCommand } from './commands/diagram.js';
 import { prReviewCommand, queryCommand } from './commands/misc.js';
 import { createCopilotAgentCommand, setupCommand } from './commands/setup.js';
 import { selectTokenOptimizationModeCommand } from './commands/token-optimization.js';
@@ -31,10 +32,37 @@ import {
 import { CodeBrainStatusBar } from './ui/status-bar.js';
 import { AgentsTreeProvider, QuickActionsTreeProvider } from './ui/tree-view.js';
 
+const MARKDOWN_MERMAID_EXTENSION_ID = 'bierner.markdown-mermaid';
+
+async function ensureMarkdownMermaidExtensionInstalled(): Promise<void> {
+  if (vscode.extensions.getExtension(MARKDOWN_MERMAID_EXTENSION_ID)) {
+    return;
+  }
+
+  const action = await vscode.window.showInformationMessage(
+    'CodeBrain: Install Markdown Mermaid to enable Mermaid diagram preview in temporary .md files.',
+    'Install',
+    'Later',
+  );
+
+  if (action !== 'Install') {
+    return;
+  }
+
+  try {
+    await vscode.commands.executeCommand('workbench.extensions.installExtension', MARKDOWN_MERMAID_EXTENSION_ID);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    getOutputChannel().appendLine(`Failed to install ${MARKDOWN_MERMAID_EXTENSION_ID}: ${message}`);
+    vscode.window.showWarningMessage(`CodeBrain: Could not auto-install ${MARKDOWN_MERMAID_EXTENSION_ID}.`);
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = getOutputChannel();
   initializeCodeBrainRuntime(context.globalStorageUri.fsPath);
   configureReportPanel(context.extensionUri);
+  void ensureMarkdownMermaidExtensionInstalled();
 
   context.subscriptions.push(registerCodeGraphMcpProvider(context));
   const statusBar = new CodeBrainStatusBar();
@@ -110,6 +138,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ],
     ['codebrain.clean', cleanCommand],
     ['codebrain.query', queryCommand],
+    ['codebrain.generateFlowDiagram', generateFlowDiagramCommand],
     ['codebrain.prReview', prReviewCommand],
     ['codebrain.workflow.architecture', () => openWorkflowChatCommand('architecture')],
     ['codebrain.workflow.explain', () => openWorkflowChatCommand('explain')],

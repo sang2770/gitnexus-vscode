@@ -75,6 +75,11 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
         command: 'codebrain.workflow.architecture',
       },
       {
+        label: 'Generate Flow Diagram',
+        description: 'Auto-generate a Markdown + Mermaid flow diagram from CodeGraph context',
+        command: 'codebrain.generateFlowDiagram',
+      },
+      {
         label: 'Token Optimization Mode',
         description: 'Choose auto, compact, balanced, full, or off',
         command: 'codebrain.tokenOptimization.selectMode',

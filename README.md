@@ -179,6 +179,7 @@ Key differences:
 - Built-in MCP server definition provider: `codebrain.codegraph`.
 - Bundled CodeGraph runtime assets under `runtime/codegraph`, executed with the system `node`.
 - Impact Lens view for symbol-level impact, callers, callees, tests, and chat handoff.
+- Auto-generated flow diagrams from CodeGraph callers/callees via Command Palette.
 - Token optimization modes: `auto`, `compact`, `balanced`, `full`, `off`.
 - Copilot Agent scaffold at `.github/agents/codebrain.agent.md`.
 - Command Palette shortcuts for setup, indexing, workflow prompts, review, and graph queries.
@@ -253,6 +254,7 @@ Use CodeBrain as a safety layer around normal AI-assisted development:
 | `CodeBrain: Force Re-index` | Rebuilds the index from scratch. |
 | `CodeBrain: Show Index Status` | Displays index health and freshness. |
 | `CodeBrain: Query CodeGraph` | Runs direct graph queries for ad-hoc exploration. |
+| `CodeBrain: Generate Flow Diagram` | Generates a flow diagram for the active symbol or query. |
 | `CodeBrain: Clean CodeGraph Index` | Removes the workspace CodeGraph index. |
 
 ### Workflows
