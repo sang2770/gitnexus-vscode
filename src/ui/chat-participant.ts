@@ -1103,12 +1103,18 @@ export class CodeGraphAgentParticipant {
       return { metadata: { handledBy: 'reviewSlashRedirectSkippedNoGit' } };
     }
 
-    if (!hasWorkingTreeDiff(workspaceRoot)) {
+    const requestedTarget = intent.target?.trim();
+    const hasExplicitReviewTarget = Boolean(
+      requestedTarget &&
+      !/^working tree diff$/iu.test(requestedTarget),
+    );
+
+    if (!hasExplicitReviewTarget && !hasWorkingTreeDiff(workspaceRoot)) {
       stream.markdown('CodeBrain skipped `/review` because no git diff was found in the working tree.');
       return { metadata: { handledBy: 'reviewSlashRedirectSkippedNoDiff' } };
     }
 
-    void vscode.commands.executeCommand('codebrain.prReview');
+    void vscode.commands.executeCommand('codebrain.prReview', hasExplicitReviewTarget ? requestedTarget : undefined);
     stream.markdown('Opening CodeBrain review flow...');
     return { metadata: { handledBy: 'reviewSlashRedirectedToPrReview' } };
   }

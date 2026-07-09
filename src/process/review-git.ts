@@ -34,6 +34,14 @@ export function getCompareChangedFiles(cwd: string, baseRef: string, maxFiles = 
   return getGitDiffFiles(cwd, ['diff', '--name-only', `${baseRef}...HEAD`], maxFiles);
 }
 
+export function getCommitChangedFiles(cwd: string, ref: string, maxFiles = 200): string[] {
+  return getGitDiffFiles(cwd, ['show', '--format=', '--name-only', ref], maxFiles);
+}
+
+export function getRangeChangedFiles(cwd: string, range: string, maxFiles = 200): string[] {
+  return getGitDiffFiles(cwd, ['diff', '--name-only', range], maxFiles);
+}
+
 export function hasWorkingTreeDiff(cwd: string): boolean {
   return getWorkingTreeChangedFiles(cwd, 1).length > 0;
 }

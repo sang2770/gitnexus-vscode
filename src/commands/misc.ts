@@ -4,6 +4,8 @@ import * as path from 'path';
 import { ensureCodeBrainCli } from '../process/prerequisites.js';
 import { getOutputChannel, getWorkspaceRoot, runCodeBrain } from '../process/cli-runner.js';
 import {
+  getCommitChangedFiles,
+  getRangeChangedFiles,
   getCompareChangedFiles,
   getStagedChangedFiles,
   getWorkingTreeChangedFiles,
@@ -761,14 +763,22 @@ function parseStatusFileCount(stdout: string): number | undefined {
   }
 }
 
-export async function prReviewCommand(): Promise<void> {
+export async function prReviewCommand(reviewTarget?: string): Promise<void> {
   const ok = await ensureCodeBrainCli();
   if (!ok) {
     return;
   }
 
   const workspaceRoot = getWorkspaceRoot();
-  const reviewMode = await pickPrReviewMode(workspaceRoot);
+  const reviewMode = reviewTarget
+    ? resolveReviewModeFromTarget(workspaceRoot, reviewTarget)
+    : await pickPrReviewMode(workspaceRoot);
+  if (reviewTarget && !reviewMode) {
+    vscode.window.showWarningMessage(
+      'CodeBrain: Review target is invalid. Use a commit SHA, a git ref like main, or a range like main...HEAD.',
+    );
+    return;
+  }
   if (!reviewMode) {
     return;
   }
@@ -822,13 +832,36 @@ export async function prReviewCommand(): Promise<void> {
   );
 }
 
-type PrReviewScope = 'selection' | 'current-file' | 'staged' | 'all' | 'compare';
+type PrReviewScope = 'selection' | 'current-file' | 'staged' | 'all' | 'compare' | 'commit' | 'range';
 
 interface PrReviewMode {
   scope: PrReviewScope;
   baseRef?: string;
+  ref?: string;
+  range?: string;
   filePath?: string;
   selectionText?: string;
+}
+
+function resolveReviewModeFromTarget(cwd: string, target: string): PrReviewMode | undefined {
+  const trimmed = target.trim();
+  if (!trimmed || /^working tree diff$/iu.test(trimmed)) {
+    return { scope: 'all' };
+  }
+
+  if (trimmed.includes('...') || trimmed.includes('..')) {
+    return { scope: 'range', range: trimmed };
+  }
+
+  if (looksLikeCommitRef(trimmed) && gitRefExists(cwd, trimmed)) {
+    return { scope: 'commit', ref: trimmed };
+  }
+
+  if (gitRefExists(cwd, trimmed)) {
+    return { scope: 'compare', baseRef: trimmed };
+  }
+
+  return undefined;
 }
 
 async function pickPrReviewMode(cwd: string): Promise<PrReviewMode | undefined> {
@@ -914,6 +947,10 @@ function getChangedFilesForReview(cwd: string, mode: PrReviewMode): string[] {
       return getWorkingTreeChangedFiles(cwd, MAX_CHANGED_FILES);
     case 'compare':
       return getCompareChangedFiles(cwd, mode.baseRef ?? 'main', MAX_CHANGED_FILES);
+    case 'commit':
+      return mode.ref ? getCommitChangedFiles(cwd, mode.ref, MAX_CHANGED_FILES) : [];
+    case 'range':
+      return mode.range ? getRangeChangedFiles(cwd, mode.range, MAX_CHANGED_FILES) : [];
     default:
       return [];
   }
@@ -987,6 +1024,8 @@ function buildReviewPrompt(ctx: ReviewPromptContext): string {
     '- Focus on correctness, behavioral regressions, missing caller updates, missing tests, and stale-index risk.',
     '- Use codegraph_explore/search to understand touched areas and codegraph_impact for non-trivial changed symbols.',
     '- Treat direct callers/dependents outside the reviewed file list as high-signal review targets.',
+    '- Start by summarizing changed scope so the reviewer understands the logical boundary before findings.',
+    '- For each non-trivial finding, explain downstream impact on callers, dependents, contracts, and tests.',
     '- Keep summaries brief; do not produce a marketing-style overview.',
     '',
     `Review scope: ${scopeSummary}`,
@@ -1000,9 +1039,11 @@ function buildReviewPrompt(ctx: ReviewPromptContext): string {
     ctx.diffPreview,
     '',
     'Expected output:',
-    '1. Findings first, each with severity and file/line evidence.',
-    '2. Open questions or assumptions.',
-    '3. Short test coverage note.',
+    '1. Changed scope summary.',
+    '2. Findings ordered by severity, each with file/line evidence and why it matters.',
+    '3. Impact and risk analysis covering dependents, regressions, and stale-index uncertainty.',
+    '4. Concrete recommended actions.',
+    '5. Short validation and test coverage note.',
   ].join('\n');
 }
 
@@ -1018,6 +1059,10 @@ function formatScopeSummary(mode: PrReviewMode): string {
       return 'working tree changes, including untracked files';
     case 'compare':
       return `compare against ${mode.baseRef ?? 'main'}`;
+    case 'commit':
+      return `commit ${mode.ref ?? 'unknown'}`;
+    case 'range':
+      return `range ${mode.range ?? 'unknown'}`;
     default:
       return mode.scope;
   }
@@ -1074,6 +1119,10 @@ function buildGitDiffArgs(mode: PrReviewMode, formatArg: string): string[] {
       return ['diff', '--cached', formatArg];
     case 'compare':
       return ['diff', formatArg, `${mode.baseRef ?? 'main'}...HEAD`];
+    case 'commit':
+      return ['show', '--format=', formatArg, mode.ref ?? 'HEAD'];
+    case 'range':
+      return ['diff', formatArg, mode.range ?? 'HEAD'];
     case 'all':
     default:
       return ['diff', formatArg, 'HEAD'];
@@ -1178,6 +1227,10 @@ function gitRefExists(cwd: string, ref: string): boolean {
   } catch {
     return false;
   }
+}
+
+function looksLikeCommitRef(ref: string): boolean {
+  return /^[0-9a-f]{7,40}$/iu.test(ref);
 }
 
 function buildToolSummary(stdout: string, stderr: string, emptyMessage: string): string {

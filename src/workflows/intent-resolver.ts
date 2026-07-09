@@ -317,8 +317,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextOptimizationStrategy:
       'Balanced mode: changed files, changed symbols, affected dependencies, and related tests.',
     promptConstructionStrategy:
-      'Lead with review findings; use graph evidence to flag hidden dependents and missing tests.',
+      'Start with changed scope, then findings ordered by severity, then downstream impact, concrete fixes, and validation based on graph evidence.',
     outputSchema: [
+      'changedScope',
       'findings',
       'impactRisk',
       'recommendationAction',
@@ -602,7 +603,11 @@ function getWorkflowSpecificOutputRequirements(
       ];
     case 'review':
       return [
-        `- Lead with concrete review findings, then give corrective action in "${headers.recommendationAction}" and checks in "${headers.validationSteps}".`,
+        `- In "${headers.changedScope}", briefly summarize what changed, which modules or files are touched, and where the logical boundary of the review is.`,
+        `- In "${headers.findings}", order findings by severity and include concrete file/line evidence when available. If there are no issues, say that explicitly.`,
+        `- In "${headers.impactRisk}", analyze downstream callers, dependents, related tests, stale-index uncertainty, and likely behavioral regressions caused by the change.`,
+        `- In "${headers.recommendationAction}", give concrete corrective actions, not generic advice.`,
+        `- In "${headers.validationSteps}", list the exact checks or tests needed to de-risk the reviewed change before merge.`,
       ];
     case 'test':
       return [
