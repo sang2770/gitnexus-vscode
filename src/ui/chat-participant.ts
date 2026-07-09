@@ -21,6 +21,7 @@ import {
   buildWorkflowInstructions,
   type CodeGraphToolKind,
   getEditorIntentContext,
+  getWorkflowResponseSections,
   resolveWorkflowIntent,
   type WorkflowIntent,
   WORKFLOW_DEFINITIONS,
@@ -247,6 +248,7 @@ export class CodeGraphAgentParticipant {
     const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
     const langNames = { vi: 'Vietnamese', ko: 'Korean', en: 'English' };
     const targetLangName = langNames[lang];
+    const workflowSections = getWorkflowResponseSections(intent.workflow, lang).join(' -> ');
     
     if (compact) {
       // Very brief instructions for follow-up turns
@@ -254,7 +256,9 @@ export class CodeGraphAgentParticipant {
         `CodeBrain follow-up (${intent.workflow})`,
         `Workspace: ${getWorkspaceRoot()}`,
         `Context: ${intent.contextMode}`,
-        'Continue using CodeGraph tools. Maintain workflow output: Context -> Findings -> Plan/Task.',
+        'Continue using CodeGraph tools.',
+        `Maintain workflow output using only these sections: ${workflowSections}.`,
+        'Do not add generic sections like Context, Findings, or Plan/Task unless they are part of the workflow schema.',
         `Mandatory: Respond entirely in ${targetLangName}.`,
       ].join('\n');
 

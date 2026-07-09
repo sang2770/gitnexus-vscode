@@ -573,6 +573,13 @@ function getLocalizedSchema(schema: LocalizedHeaderKey[], lang: 'vi' | 'ko' | 'e
   return getResponseSchemaKeys(schema).map(key => headers[key]);
 }
 
+export function getWorkflowResponseSections(
+  workflow: CodeBrainWorkflowKind,
+  lang: 'vi' | 'ko' | 'en',
+): string[] {
+  return getLocalizedSchema(WORKFLOW_DEFINITIONS[workflow].outputSchema, lang);
+}
+
 function getWorkflowSpecificOutputRequirements(
   workflow: CodeBrainWorkflowKind,
   headers: typeof LOCALIZED_HEADERS.en,
@@ -618,7 +625,7 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
   const lang = detectLanguage(intent.rawPrompt);
   const definition = WORKFLOW_DEFINITIONS[intent.workflow];
   const headers = LOCALIZED_HEADERS[lang];
-  const localizedSchema = getLocalizedSchema(definition.outputSchema, lang);
+  const localizedSchema = getWorkflowResponseSections(intent.workflow, lang);
   const orderedWorkflowSections = localizedSchema.join(' -> ');
   const workflowSpecificRequirements = getWorkflowSpecificOutputRequirements(intent.workflow, headers);
 
