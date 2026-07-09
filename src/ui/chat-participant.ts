@@ -26,6 +26,7 @@ import {
   WORKFLOW_DEFINITIONS,
   type CodeBrainWorkflowKind,
   type IntentTargetType,
+  detectLanguage,
 } from '../workflows/intent-resolver.js';
 import { chatOptimizationManager } from './chat-optimization-config.js';
 import { buildFallbackMermaidMarkdown, extractMermaidMarkdownFromResponse, writeDiagramPreviewFile } from './diagram-generation.js';
@@ -233,7 +234,8 @@ export class CodeGraphAgentParticipant {
 
   private buildInstructions(intent: WorkflowIntent, compact: boolean = false): string {
     const config = chatOptimizationManager.getConfig();
-    const cacheKey = `${intent.workflow}_${intent.contextMode}_${compact ? 'compact' : 'full'}`;
+    const lang = detectLanguage(intent.rawPrompt);
+    const cacheKey = `${intent.workflow}_${intent.contextMode}_${compact ? 'compact' : 'full'}_${lang}`;
     
     if (config.enableInstructionCaching) {
       const cached = this.instructionCache.get(cacheKey);
@@ -243,6 +245,8 @@ export class CodeGraphAgentParticipant {
     }
 
     const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
+    const langNames = { vi: 'Vietnamese', ko: 'Korean', en: 'English' };
+    const targetLangName = langNames[lang];
     
     if (compact) {
       // Very brief instructions for follow-up turns
@@ -251,7 +255,7 @@ export class CodeGraphAgentParticipant {
         `Workspace: ${getWorkspaceRoot()}`,
         `Context: ${intent.contextMode}`,
         'Continue using CodeGraph tools. Maintain workflow output: Context -> Findings -> Plan/Task.',
-        'Match the language of the user request in your response.',
+        `Mandatory: Respond entirely in ${targetLangName}.`,
       ].join('\n');
 
       if (config.enableInstructionCaching) {
@@ -278,7 +282,7 @@ export class CodeGraphAgentParticipant {
       `Workspace path: ${getWorkspaceRoot()}`,
       toolScope,
       '',
-      'Mandatory: Respond in the same language as the user request (including session headers and section titles).',
+      `Mandatory: Respond entirely in ${targetLangName} (including session headers and section titles).`,
     ].join('\n');
 
     if (config.enableInstructionCaching) {

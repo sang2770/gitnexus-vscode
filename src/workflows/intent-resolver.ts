@@ -66,6 +66,91 @@ export interface WorkflowToolStep {
   required: boolean;
 }
 
+export const LOCALIZED_HEADERS = {
+  en: {
+    contextUsed: 'Context Used',
+    externalContextUsed: 'External Context Used',
+    whySelected: 'Why Selected',
+    tokenReduction: 'Token Reduction',
+    selfCheck: 'Self-check',
+    findings: 'Findings',
+    architectureOverview: 'Architecture Overview',
+    architectureFindings: 'Architecture Findings',
+    flowDiagram: 'Flow Diagram',
+    risks: 'Risks',
+    recommendedNextActions: 'Recommended Next Actions',
+    mainFlow: 'Main Flow',
+    dataFlow: 'Data Flow',
+    recommendation: 'Recommendation',
+    recommendationAction: 'Recommendation / Action',
+    impactRisk: 'Impact / Risk',
+    changedScope: 'Changed Scope',
+    testTargets: 'Test Targets',
+    recommendedTestCases: 'Recommended Test Cases',
+    validationSteps: 'Validation Steps',
+    plan: 'Plan',
+    copilotAgentTask: 'Copilot Agent Task',
+  },
+  vi: {
+    contextUsed: 'Ngữ cảnh sử dụng',
+    externalContextUsed: 'Ngữ cảnh bên ngoài sử dụng',
+    whySelected: 'Lý do lựa chọn',
+    tokenReduction: 'Tối ưu hóa Token',
+    selfCheck: 'Tự kiểm tra',
+    findings: 'Kết quả phân tích',
+    architectureOverview: 'Tổng quan kiến trúc',
+    architectureFindings: 'Cấu trúc kiến trúc',
+    flowDiagram: 'Sơ đồ luồng',
+    risks: 'Rủi ro',
+    recommendedNextActions: 'Hành động đề xuất tiếp theo',
+    mainFlow: 'Luồng xử lý chính',
+    dataFlow: 'Luồng dữ liệu',
+    recommendation: 'Khuyến nghị',
+    recommendationAction: 'Khuyến nghị / Hành động',
+    impactRisk: 'Ảnh hưởng / Rủi ro',
+    changedScope: 'Phạm vi thay đổi',
+    testTargets: 'Mục tiêu kiểm thử',
+    recommendedTestCases: 'Kịch bản kiểm thử đề xuất',
+    validationSteps: 'Các bước kiểm chứng',
+    plan: 'Kế hoạch triển khai',
+    copilotAgentTask: 'Nhiệm vụ cho Copilot Agent',
+  },
+  ko: {
+    contextUsed: '사용된 컨텍스트',
+    externalContextUsed: '사용된 외부 컨텍스트',
+    whySelected: '선택 이유',
+    tokenReduction: '토큰 감축',
+    selfCheck: '자가 점검',
+    findings: '분석 결과',
+    architectureOverview: '아키텍처 개요',
+    architectureFindings: '아키텍처 분석',
+    flowDiagram: '흐름 다이어그램',
+    risks: '리스크',
+    recommendedNextActions: '추천 후속 조치',
+    mainFlow: '주요 흐름',
+    dataFlow: '데이터 흐름',
+    recommendation: '추천 사항',
+    recommendationAction: '추천 사항 / 작업',
+    impactRisk: '영향도 / 리스크',
+    changedScope: '변경 범위',
+    testTargets: '테스트 대상',
+    recommendedTestCases: '추천 테스트 케이스',
+    validationSteps: '검증 단계',
+    plan: '구현 계획',
+    copilotAgentTask: 'Copilot 에이전트 작업',
+  }
+};
+
+export type LocalizedHeaderKey = keyof typeof LOCALIZED_HEADERS.en;
+
+const CONTEXT_REPORT_KEYS: ReadonlySet<LocalizedHeaderKey> = new Set([
+  'contextUsed',
+  'externalContextUsed',
+  'whySelected',
+  'tokenReduction',
+  'selfCheck',
+]);
+
 export interface WorkflowDefinition {
   kind: CodeBrainWorkflowKind;
   slashCommand: string;
@@ -78,7 +163,7 @@ export interface WorkflowDefinition {
   supplementalContextPlan?: string[];
   contextOptimizationStrategy: string;
   promptConstructionStrategy: string;
-  outputSchema: string[];
+  outputSchema: LocalizedHeaderKey[];
   exampleConversation: string[];
   toolPlan: WorkflowToolStep[];
   producesAgentTask: boolean;
@@ -131,13 +216,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     promptConstructionStrategy:
       'Ask Copilot to explain system shape from graph evidence and name selected files before reasoning.',
     outputSchema: [
-      'Context Used',
-      'Why Selected',
-      'Token Reduction',
-      'Architecture Findings',
-      'Risks',
-      'Recommended Next Actions',
-      'Self-check',
+      'architectureOverview',
+      'architectureFindings',
+      'flowDiagram',
     ],
     exampleConversation: [
       'User: @CodeBrain /architecture auth module',
@@ -169,13 +250,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     promptConstructionStrategy:
       'Explain only after graph retrieval; prefer execution/data flow over generic chatbot prose.',
     outputSchema: [
-      'Context Used',
-      'Why Selected',
-      'Token Reduction',
-      'Main Flow',
-      'Data Flow',
-      'Recommendation',
-      'Self-check',
+      'mainFlow',
+      'dataFlow',
+      'flowDiagram',
     ],
     exampleConversation: [
       'User: @CodeBrain /explain AuthService.login',
@@ -208,13 +285,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     promptConstructionStrategy:
       'Summarize blast radius and risk from CodeGraph output; never infer hidden callers without saying confidence is limited.',
     outputSchema: [
-      'Context Used',
-      'Why Selected',
-      'Token Reduction',
-      'Findings',
-      'Impact / Risk',
-      'Recommendation',
-      'Self-check',
+      'findings',
+      'impactRisk',
+      'recommendedNextActions',
     ],
     exampleConversation: [
       'User: @CodeBrain /impact AuthService.login',
@@ -246,13 +319,10 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     promptConstructionStrategy:
       'Lead with review findings; use graph evidence to flag hidden dependents and missing tests.',
     outputSchema: [
-      'Context Used',
-      'Why Selected',
-      'Token Reduction',
-      'Findings',
-      'Impact / Risk',
-      'Recommendation / Action',
-      'Self-check',
+      'findings',
+      'impactRisk',
+      'recommendationAction',
+      'validationSteps',
     ],
     exampleConversation: [
       'User: @CodeBrain /review',
@@ -283,13 +353,10 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     promptConstructionStrategy:
       'Generate a focused test plan with files to update and validation commands, not broad advice.',
     outputSchema: [
-      'Context Used',
-      'Why Selected',
-      'Token Reduction',
-      'Test Targets',
-      'Recommended Test Cases',
-      'Validation Steps',
-      'Self-check',
+      'testTargets',
+      'recommendedTestCases',
+      'validationSteps',
+      'copilotAgentTask',
     ],
     exampleConversation: [
       'User: @CodeBrain /test AuthService.login',
@@ -320,13 +387,10 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     promptConstructionStrategy:
       'Report what changed, what it may affect, and what should be validated before merge.',
     outputSchema: [
-      'Context Used',
-      'Why Selected',
-      'Token Reduction',
-      'Changed Scope',
-      'Impact / Risk',
-      'Recommendation',
-      'Self-check',
+      'changedScope',
+      'impactRisk',
+      'recommendedNextActions',
+      'validationSteps',
     ],
     exampleConversation: [
       'User: @CodeBrain /detect_change',
@@ -397,15 +461,11 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     promptConstructionStrategy:
       'Generate a plan first, combining CodeGraph evidence with Jira/collab requirements when available, then produce a structured Copilot Agent task with edit files, constraints, risks, tests, and validation steps.',
     outputSchema: [
-      'Context Used',
-      'External Context Used',
-      'Why Selected',
-      'Token Reduction',
-      'Findings',
-      'Plan',
-      'Copilot Agent Task',
-      'Validation Steps',
-      'Self-check',
+      'findings',
+      'impactRisk',
+      'plan',
+      'copilotAgentTask',
+      'validationSteps',
     ],
     exampleConversation: [
       'User: @CodeBrain /plan ABC-123 add auth token rotation using the linked collab design',
@@ -475,13 +535,99 @@ export function resolveWorkflowIntent(input: {
   return withClarificationCheck(heuristic);
 }
 
+export function detectLanguage(prompt: string): 'vi' | 'ko' | 'en' {
+  const envLang = vscode.env.language.toLowerCase();
+  if (envLang.startsWith('vi')) {
+    return 'vi';
+  }
+  if (envLang.startsWith('ko')) {
+    return 'ko';
+  }
+
+  // Check prompt text for Vietnamese accents
+  const viRegex = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ]/u;
+  if (viRegex.test(prompt)) {
+    return 'vi';
+  }
+
+  // Check prompt text for Korean characters (Hangul)
+  const koRegex = /[\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]/u;
+  if (koRegex.test(prompt)) {
+    return 'ko';
+  }
+
+  return 'en';
+}
+
+function isContextReportEnabled(): boolean {
+  return vscode.workspace.getConfiguration().get<boolean>('codebrain.showContextReport', false);
+}
+
+function getResponseSchemaKeys(schema: LocalizedHeaderKey[]): LocalizedHeaderKey[] {
+  return schema.filter(key => !CONTEXT_REPORT_KEYS.has(key));
+}
+
+function getLocalizedSchema(schema: LocalizedHeaderKey[], lang: 'vi' | 'ko' | 'en'): string[] {
+  const headers = LOCALIZED_HEADERS[lang];
+
+  return getResponseSchemaKeys(schema).map(key => headers[key]);
+}
+
+function getWorkflowSpecificOutputRequirements(
+  workflow: CodeBrainWorkflowKind,
+  headers: typeof LOCALIZED_HEADERS.en,
+): string[] {
+  switch (workflow) {
+    case 'architecture':
+      return [
+        `- Focus on high-level system shape in "${headers.architectureOverview}".`,
+        `- In "${headers.architectureFindings}", summarize major modules, responsibilities, boundaries, and important dependencies.`,
+        `- In "${headers.flowDiagram}", include one Mermaid fenced code block that shows the main architecture or runtime interaction flow.`,
+      ];
+    case 'explain':
+      return [
+        `- Focus on explaining the runtime path in "${headers.mainFlow}" and the state/input-output movement in "${headers.dataFlow}".`,
+        `- In "${headers.flowDiagram}", include one Mermaid fenced code block that shows the concrete execution flow for the explained target.`,
+      ];
+    case 'impact':
+      return [
+        `- Focus on what is affected, why it is affected, and what should be checked next in "${headers.recommendedNextActions}".`,
+      ];
+    case 'review':
+      return [
+        `- Lead with concrete review findings, then give corrective action in "${headers.recommendationAction}" and checks in "${headers.validationSteps}".`,
+      ];
+    case 'test':
+      return [
+        `- Focus on what to test, the exact scenarios to cover, and a concrete agent-executable task in "${headers.copilotAgentTask}".`,
+      ];
+    case 'detect_change':
+      return [
+        `- Focus on what changed, the likely blast radius, and what to validate immediately.`,
+      ];
+    case 'plan':
+      return [
+        `- Focus on implementation findings, execution plan, risks, validation, and the final agent task only.`,
+      ];
+    default:
+      return [];
+  }
+}
+
 export function buildWorkflowInstructions(intent: WorkflowIntent): string {
+  const lang = detectLanguage(intent.rawPrompt);
   const definition = WORKFLOW_DEFINITIONS[intent.workflow];
-  const diagramDslRequirement = intent.workflow === 'diagram'
-    ? [
-        '- For diagram workflow, include one fenced code block using ```mermaid with a valid Mermaid diagram.',
-      ]
-    : [];
+  const headers = LOCALIZED_HEADERS[lang];
+  const localizedSchema = getLocalizedSchema(definition.outputSchema, lang);
+  const orderedWorkflowSections = localizedSchema.join(' -> ');
+  const workflowSpecificRequirements = getWorkflowSpecificOutputRequirements(intent.workflow, headers);
+
+  const languageInstructions = {
+    en: 'Mandatory: Write the entire response in English. Use English for all headers and section titles.',
+    vi: 'Mandatory: Bạn PHẢI viết toàn bộ phản hồi bằng tiếng Việt. Sử dụng tiếng Việt cho tất cả các tiêu đề và phần nội dung.',
+    ko: 'Mandatory: 전체 응답을 한국어로 작성해야 합니다. 모든 헤더와 섹션 제목에 한국어를 사용하십시오.'
+  };
+
   const intentJson = JSON.stringify(
     {
       workflow: intent.workflow,
@@ -502,6 +648,8 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
     'Do not behave like a generic chatbot. Resolve intent into the workflow below, retrieve graph evidence first, then reason.',
     'Do not directly edit files from this chat participant. For implementation work, generate a structured Copilot Agent Task.',
     '',
+    languageInstructions[lang],
+    '',
     `Resolved intent:\n${intentJson}`,
     '',
     `Workflow: ${definition.label} (${definition.slashCommand})`,
@@ -520,32 +668,34 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
         ]
       : []),
     '',
-    ...(intent.workflow === 'diagram'
-      ? [
-          'Mandatory output requirements:',
-          '- Return exactly one fenced code block using ```mermaid.',
-          '- Do not include any explanations, introduction, or other markdown headers before or after the code block.',
-        ]
-      : [
-          'Mandatory output requirements:',
-          '- Always include a "Context Used" section.',
-          ...(definition.supplementalContextPlan?.length
-            ? ['- Always include an "External Context Used" section that names Jira/collab sources or says they were unavailable.']
-            : []),
-          '- Always include a "Why Selected" section.',
-          '- Always include a "Token Reduction" section with Files Scanned, Files Selected, estimated before/after tokens, and reduction percentage.',
-          '- If a metric is not available from CodeGraph output, write "Unknown" and state what evidence is missing. Do not invent numbers.',
-          '- Use CodeGraph tool results as evidence. Do not blindly answer from prompt text.',
-          '- Keep the answer workflow-shaped: Context -> Findings -> Impact/Risk when relevant -> Action/Agent Task -> Self-check.',
-          ...diagramDslRequirement,
-        ]),
   ];
+
+  if (intent.workflow === 'diagram') {
+    promptParts.push(
+      'Mandatory output requirements:',
+      '- Return exactly one fenced code block using ```mermaid.',
+      '- Do not include any explanations, introduction, or other markdown headers before or after the code block.'
+    );
+  } else {
+    const mandatoryRequirements = [
+      'Mandatory output requirements:',
+    ];
+
+    mandatoryRequirements.push(
+      '- Use CodeGraph tool results as evidence. Do not blindly answer from prompt text.',
+      '- Return only the sections relevant to this slash workflow. Do not include context-report/meta sections unless the user explicitly asks for them.',
+      `- Keep the answer workflow-shaped and use this section order: ${orderedWorkflowSections}.`,
+      ...workflowSpecificRequirements
+    );
+
+    promptParts.push(...mandatoryRequirements);
+  }
 
   if (intent.workflow !== 'diagram') {
     promptParts.push(
       '',
       'Expected output schema:',
-      ...definition.outputSchema.map((section) => `- ${section}`)
+      ...localizedSchema.map((section) => `- ${section}`)
     );
   }
 
