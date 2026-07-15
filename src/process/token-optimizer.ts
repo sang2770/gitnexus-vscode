@@ -43,19 +43,19 @@ const MODE_DEFAULTS: Record<ContextMode, {
   historyCharsPerTurn: number;
 }> = {
   compact: {
-    defaultBudget: 6000,
+    defaultBudget: 7000,
     queryResultLimit: 5,
     historyTurnLimit: 2,
     historyCharsPerTurn: 600,
   },
   balanced: {
-    defaultBudget: 12000,
+    defaultBudget: 14000,
     queryResultLimit: 12,
     historyTurnLimit: 4,
     historyCharsPerTurn: 900,
   },
   full: {
-    defaultBudget: 24000,
+    defaultBudget: 22000,
     queryResultLimit: 20,
     historyTurnLimit: 6,
     historyCharsPerTurn: 1400,

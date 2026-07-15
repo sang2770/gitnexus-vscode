@@ -45,7 +45,7 @@ async function ensureMarkdownMermaidExtensionInstalled(): Promise<void> {
     'Later',
   );
 
-  if (action !== 'Install') {
+  if (action !== 'Install' || action === undefined || action === null) {
     return;
   }
 

@@ -2,7 +2,7 @@
   "name": "codebrain-vscode",
   "displayName": "CodeBrain",
   "description": "Repository-aware AI workflow orchestration for CodeGraph, Copilot Chat, and MCP.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "codebrain",
   "license": "MIT",
   "repository": {
@@ -217,17 +217,17 @@
         },
         "codebrain.tokenOptimization.compactMaxTokens": {
           "type": "number",
-          "default": 6000,
+          "default": 7000,
           "description": "Target token budget for compact CodeBrain context."
         },
         "codebrain.tokenOptimization.balancedMaxTokens": {
           "type": "number",
-          "default": 12000,
+          "default": 14000,
           "description": "Target token budget for balanced CodeBrain context."
         },
         "codebrain.tokenOptimization.fullMaxTokens": {
           "type": "number",
-          "default": 24000,
+          "default": 22000,
           "description": "Target token budget for full CodeBrain context."
         },
         "codebrain.showContextReport": {

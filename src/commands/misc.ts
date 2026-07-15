@@ -821,6 +821,7 @@ export async function prReviewCommand(reviewTarget?: string): Promise<void> {
         statusSummary: formatStatusSummary(statusResult.stdout, statusResult.stderr),
         affectedSummary: formatAffectedSummary(affectedResult.stdout, affectedResult.stderr),
         diffPreview: buildReviewSnippet(workspaceRoot, reviewMode),
+        tokenBudget: getTokenOptimizationSettings('balanced').tokenBudget,
       });
 
       const encodedPrompt = encodeURIComponent(prompt);
@@ -967,6 +968,7 @@ interface ReviewPromptContext {
   statusSummary: string;
   affectedSummary: string;
   diffPreview: string;
+  tokenBudget: number;
 }
 
 interface StatusJson {
@@ -1015,6 +1017,15 @@ function toWorkspaceRelativePath(cwd: string, filePath: string): string | undefi
 function buildReviewPrompt(ctx: ReviewPromptContext): string {
   const scopeSummary = formatScopeSummary(ctx.mode);
   const changedSection = ctx.changedFiles.map((file) => `- ${file}`).join('\n');
+  const coverageWarnings = [
+    ctx.changedFiles.length >= MAX_CHANGED_FILES
+      ? `- Changed file list may be capped at the first ${MAX_CHANGED_FILES} files. Treat coverage outside this list as unknown risk.`
+      : undefined,
+    ctx.diffPreview.includes('[truncated]')
+      ? '- Diff preview is truncated. Do not claim full review coverage for omitted hunks without additional graph evidence.'
+      : undefined,
+    `- Token budget target for this review context is ${ctx.tokenBudget} tokens. Prioritize high-risk findings and the most important downstream impact first.`,
+  ].filter(Boolean).join('\n');
 
   return [
     'Run a code review using CodeBrain and CodeGraph MCP tools.',
@@ -1026,11 +1037,16 @@ function buildReviewPrompt(ctx: ReviewPromptContext): string {
     '- Treat direct callers/dependents outside the reviewed file list as high-signal review targets.',
     '- Start by summarizing changed scope so the reviewer understands the logical boundary before findings.',
     '- For each non-trivial finding, explain downstream impact on callers, dependents, contracts, and tests.',
+    '- Tag each finding with a category: correctness, regression, security, compatibility, performance, maintainability, or testing.',
+    '- Give an overall merge-risk verdict of Critical, High, Medium, Low, or Unknown, and state confidence.',
+    '- Do not say safe to merge when review scope is incomplete, diff evidence is truncated, or index freshness is uncertain.',
     '- Keep summaries brief; do not produce a marketing-style overview.',
     '',
     `Review scope: ${scopeSummary}`,
     `Changed/reviewed files (${ctx.changedFiles.length}):`,
     changedSection || '- None',
+    '',
+    `Coverage warnings:\n${coverageWarnings}`,
     '',
     `CodeGraph status preflight:\n${ctx.statusSummary}`,
     '',
@@ -1040,8 +1056,8 @@ function buildReviewPrompt(ctx: ReviewPromptContext): string {
     '',
     'Expected output:',
     '1. Changed scope summary.',
-    '2. Findings ordered by severity, each with file/line evidence and why it matters.',
-    '3. Impact and risk analysis covering dependents, regressions, and stale-index uncertainty.',
+    '2. Findings ordered by severity, each with category, file/line evidence, and why it matters.',
+    '3. Impact and risk analysis covering dependents, regressions, stale-index uncertainty, and an overall merge-risk verdict with confidence.',
     '4. Concrete recommended actions.',
     '5. Short validation and test coverage note.',
   ].join('\n');
@@ -1069,11 +1085,12 @@ function formatScopeSummary(mode: PrReviewMode): string {
 }
 
 function buildReviewSnippet(cwd: string, mode: PrReviewMode): string {
+  const snippetLimit = getReviewSnippetCharLimit();
   if (mode.scope === 'selection') {
     return [
       `Selected code from ${mode.filePath ?? 'active editor'}:`,
       '```',
-      escapeCodeFence(mode.selectionText ?? ''),
+      escapeCodeFence(truncateText(mode.selectionText ?? '', snippetLimit)),
       '```',
     ].join('\n');
   }
@@ -1086,20 +1103,21 @@ function buildReviewSnippet(cwd: string, mode: PrReviewMode): string {
       : '';
 
     if (diff.trim()) {
-      return formatSnippet('Current file diff preview', diff);
+      return formatSnippet('Current file diff preview', diff, snippetLimit);
     }
 
     return formatSnippet(
       `Current file snapshot: ${mode.filePath ?? 'active editor'}`,
       currentText || 'No current editor content captured.',
+      snippetLimit,
     );
   }
 
   const stat = getGitDiffStat(cwd, mode);
   const patch = getGitDiffPatch(cwd, mode);
   const parts = [
-    stat ? formatSnippet('Diff stat', stat, 2000) : undefined,
-    patch ? formatSnippet('Diff preview', patch) : 'Diff preview: no tracked-file patch captured.',
+    stat ? formatSnippet('Diff stat', stat, Math.min(2000, snippetLimit)) : undefined,
+    patch ? formatSnippet('Diff preview', patch, snippetLimit) : 'Diff preview: no tracked-file patch captured.',
   ].filter(Boolean);
 
   return parts.join('\n\n');
@@ -1196,6 +1214,19 @@ function formatSnippet(title: string, text: string, limit = MAX_REVIEW_SNIPPET_C
     escapeCodeFence(truncateText(text, limit)),
     '```',
   ].join('\n');
+}
+
+function getReviewSnippetCharLimit(): number {
+  const settings = getTokenOptimizationSettings('balanced');
+  switch (settings.effectiveMode) {
+    case 'compact':
+      return 3200;
+    case 'full':
+      return MAX_REVIEW_SNIPPET_CHARS;
+    case 'balanced':
+    default:
+      return 5200;
+  }
 }
 
 function truncateText(text: string, limit: number): string {

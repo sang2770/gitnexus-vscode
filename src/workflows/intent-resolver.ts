@@ -235,7 +235,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     kind: 'explain',
     slashCommand: '/explain',
     label: 'Explain Flow',
-    contextMode: 'compact',
+    contextMode: 'balanced',
     intentParsingStrategy:
       'Slash command or selected symbol first; otherwise use current editor context and symbol extraction.',
     mcpToolsRequired: ['explore', 'callers', 'callees', 'node'],
@@ -246,9 +246,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'codegraph_node: fetch exact symbol body only if explore trimmed necessary details.',
     ],
     contextOptimizationStrategy:
-      'Compact mode: current symbol, direct references, and minimal flow windows.',
+      'Balanced mode: target source, direct callers, direct callees, and the smallest set of surrounding flow evidence needed for a faithful explanation.',
     promptConstructionStrategy:
-      'Explain only after graph retrieval; prefer execution/data flow over generic chatbot prose.',
+      'Explain only after graph retrieval; reconstruct runtime order, data movement, side effects, and error boundaries from evidence instead of generic prose.',
     outputSchema: [
       'mainFlow',
       'dataFlow',
@@ -260,8 +260,8 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     ],
     toolPlan: [
       { toolKind: 'explore', purpose: 'Retrieve compact source context for the target flow.', required: true },
-      { toolKind: 'callers', purpose: 'Confirm direct entry points for the explained symbol.', required: false },
-      { toolKind: 'callees', purpose: 'Confirm direct dependencies for the explained symbol.', required: false },
+      { toolKind: 'callers', purpose: 'Confirm direct entry points for the explained symbol.', required: true },
+      { toolKind: 'callees', purpose: 'Confirm direct dependencies for the explained symbol.', required: true },
       { toolKind: 'node', purpose: 'Fetch exact symbol body only if explore trimmed necessary details.', required: false },
     ],
     producesAgentTask: false,
@@ -483,6 +483,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
 
 const LOW_CONFIDENCE_THRESHOLD = 0.55;
 const SYMBOL_PATTERN = /\b[A-Za-z_$][\w$]*(?:(?:\.|::)[A-Za-z_$][\w$]*)+\b/u;
+const SIMPLE_SYMBOL_PATTERN = /^[A-Za-z_$][\w$]*$/u;
 
 export function getEditorIntentContext(workspaceRoot: string): EditorIntentContext {
   const editor = vscode.window.activeTextEditor;
@@ -594,7 +595,8 @@ function getWorkflowSpecificOutputRequirements(
       ];
     case 'explain':
       return [
-        `- Focus on explaining the runtime path in "${headers.mainFlow}" and the state/input-output movement in "${headers.dataFlow}".`,
+        `- In "${headers.mainFlow}", explain the execution path step by step, starting from the entry point and continuing through important branches, side effects, and return behavior.`,
+        `- In "${headers.dataFlow}", describe inputs, state changes, outputs, and error or guard paths that materially change behavior.`,
         `- In "${headers.flowDiagram}", include one Mermaid fenced code block that shows the concrete execution flow for the explained target.`,
       ];
     case 'impact':
@@ -604,8 +606,8 @@ function getWorkflowSpecificOutputRequirements(
     case 'review':
       return [
         `- In "${headers.changedScope}", briefly summarize what changed, which modules or files are touched, and where the logical boundary of the review is.`,
-        `- In "${headers.findings}", order findings by severity and include concrete file/line evidence when available. If there are no issues, say that explicitly.`,
-        `- In "${headers.impactRisk}", analyze downstream callers, dependents, related tests, stale-index uncertainty, and likely behavioral regressions caused by the change.`,
+        `- In "${headers.findings}", order findings by severity, include concrete file/line evidence when available, and tag each finding with a risk category such as correctness, regression, security, performance, compatibility, or testing. If there are no issues, say that explicitly.`,
+        `- In "${headers.impactRisk}", analyze downstream callers, dependents, related tests, stale-index uncertainty, likely behavioral regressions, and give an overall merge-risk verdict with confidence.`,
         `- In "${headers.recommendationAction}", give concrete corrective actions, not generic advice.`,
         `- In "${headers.validationSteps}", list the exact checks or tests needed to de-risk the reviewed change before merge.`,
       ];
@@ -770,11 +772,13 @@ function resolveHeuristicWorkflow(prompt: string, editorContext: EditorIntentCon
   }
 
   if (/\b(review|pr|diff|changed files|working tree)\b/u.test(lower)) {
-    return baseIntent('review', 'working tree diff', 'diff', 0.78, 'git-diff', prompt);
+    const target = resolveTarget(prompt, 'review', editorContext);
+    return baseIntent('review', target.value, target.type, 0.78, 'git-diff', prompt);
   }
 
   if (/\b(detect change|detect changes|change impact|pending changes)\b/u.test(lower)) {
-    return baseIntent('detect_change', 'working tree diff', 'diff', 0.78, 'git-diff', prompt);
+    const target = resolveTarget(prompt, 'detect_change', editorContext);
+    return baseIntent('detect_change', target.value, target.type, 0.78, 'git-diff', prompt);
   }
 
   if (/\b(diagram|flow diagram|workflow diagram|architecture diagram|sequence diagram)\b/u.test(lower)) {
@@ -849,6 +853,9 @@ function resolveTarget(
     const symbol = extractSymbol(trimmed);
     if (symbol && (workflow === 'impact' || workflow === 'explain')) {
       return { value: symbol, type: 'symbol' };
+    }
+    if ((workflow === 'impact' || workflow === 'explain') && SIMPLE_SYMBOL_PATTERN.test(trimmed)) {
+      return { value: trimmed, type: 'symbol' };
     }
     return { value: trimmed, type: workflow === 'impact' ? 'symbol' : 'task' };
   }

@@ -8,7 +8,7 @@ import {
   isContextReportEnabled,
 } from '../process/context-analysis.js';
 import { getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
-import { hasWorkingTreeDiff, isInsideGitWorkTree } from '../process/review-git.js';
+import { getWorkingTreeChangeContext, hasWorkingTreeDiff, isInsideGitWorkTree } from '../process/review-git.js';
 import {
   buildTokenReductionMarkdown,
   createTokenReductionReport,
@@ -54,6 +54,9 @@ interface GroundedToolResult {
 
 const PARTICIPANT_ID = 'codebrain.codegraph';
 const MAX_TOOL_CALL_ROUNDS = 5;
+const GROUNDING_RESPONSE_RESERVE_TOKENS = 1200;
+const GROUNDING_RESPONSE_RESERVE_RATIO = 0.18;
+const SIMPLE_SYMBOL_PATTERN = /^[A-Za-z_$][\w$]*$/u;
 const CONTEXT_REPORT_WORKFLOWS = new Set<WorkflowIntent['workflow']>([
   'architecture',
   'explain',
@@ -76,6 +79,22 @@ const TOOL_ALIASES: Record<CodeGraphToolKind, string[]> = {
   files: ['files'],
   status: ['status'],
 };
+
+const GROUNDING_CHAR_LIMITS: Record<CodeGraphToolKind, Record<'compact' | 'balanced' | 'full', number>> = {
+  status: { compact: 700, balanced: 900, full: 1200 },
+  files: { compact: 900, balanced: 1400, full: 1800 },
+  search: { compact: 900, balanced: 1400, full: 1800 },
+  callers: { compact: 1100, balanced: 1700, full: 2200 },
+  callees: { compact: 1100, balanced: 1700, full: 2200 },
+  impact: { compact: 1400, balanced: 2200, full: 3000 },
+  node: { compact: 1600, balanced: 2400, full: 3200 },
+  explore: { compact: 1800, balanced: 2800, full: 3800 },
+};
+
+function normalizeSlashCommand(command: string | undefined): string | undefined {
+  const normalized = command?.trim().replace(/^\//u, '').toLowerCase().replace(/-/gu, '_');
+  return normalized || undefined;
+}
 
 function getTargetType(target: string | undefined | null, workflow: string): IntentTargetType {
   if (!target) {
@@ -115,7 +134,7 @@ export class CodeGraphAgentParticipant {
   }
 
   private getOrCreateState(request: vscode.ChatRequest): ConversationState {
-    const id = request.command || 'default';
+    const id = normalizeSlashCommand(request.command) || 'default';
     let state = this.conversationStates.get(id);
     if (!state) {
       state = {
@@ -128,6 +147,16 @@ export class CodeGraphAgentParticipant {
     }
     state.lastUpdate = Date.now();
     return state;
+  }
+
+  private updateConversationState(state: ConversationState, intent: WorkflowIntent): void {
+    state.lastIntent = intent;
+    if (intent.targetType === 'symbol' && intent.target) {
+      state.seenSymbols.add(intent.target);
+    }
+    if (intent.targetType === 'file' && intent.target) {
+      state.seenFiles.add(intent.target);
+    }
   }
 
   private resolveIntent(request: vscode.ChatRequest): WorkflowIntent {
@@ -392,6 +421,7 @@ export class CodeGraphAgentParticipant {
     intent: WorkflowIntent,
     request: vscode.ChatRequest,
     round: number,
+    executedKinds: Set<CodeGraphToolKind>,
   ): {
     tools?: vscode.LanguageModelChatTool[];
     toolMode?: vscode.LanguageModelChatToolMode;
@@ -409,13 +439,15 @@ export class CodeGraphAgentParticipant {
     
     // Phase 2: Progressive Tool Selection
     if (config.enableProgressiveTools && round === 0) {
-      const requiredSteps = WORKFLOW_DEFINITIONS[intent.workflow].toolPlan.filter((step) => step.required);
+      const requiredKinds = this.resolveRequiredToolKinds(intent).filter((kind) => !executedKinds.has(kind));
       const essentialTools: vscode.LanguageModelToolInformation[] = [];
       
-      // Always include the first required tool kind if available
-      if (requiredSteps.length > 0) {
-        const tool = this.selectCodeGraphToolByKind(allTools, requiredSteps[0].toolKind);
-        if (tool) essentialTools.push(tool);
+      // Include as many required steps as round 0 can support so explain/review start with enough evidence.
+      for (const kind of requiredKinds.slice(0, Math.max(1, config.maxToolsRound0))) {
+        const tool = this.selectCodeGraphToolByKind(allTools, kind);
+        if (tool) {
+          essentialTools.push(tool);
+        }
       }
       
       // Add a generic search/explore if not already there and limit is not reached
@@ -442,9 +474,7 @@ export class CodeGraphAgentParticipant {
       }
     }
 
-    const requiredSteps = WORKFLOW_DEFINITIONS[intent.workflow].toolPlan.filter((step) => step.required);
-    const workflowRound = Math.max(0, round - (resolvedAttachedTools.length > 0 ? 1 : 0));
-    const requiredKind = requiredSteps[workflowRound]?.toolKind;
+    const requiredKind = this.resolveRequiredToolKinds(intent).find((kind) => !executedKinds.has(kind));
     if (requiredKind) {
       const tool = this.selectCodeGraphToolByKind(allTools, requiredKind);
       if (tool) {
@@ -517,12 +547,16 @@ export class CodeGraphAgentParticipant {
       source: 'chat-initial-prompt',
       modelId,
     });
-    const prompt = this.appendOptionalPromptSection(
+    let prompt = this.appendOptionalPromptSection(
       optimizedPrompt.prompt,
       buildTokenReductionMarkdown(report),
       tokenSettings.tokenBudget,
       modelId,
     );
+    const detectChangeSection = this.buildDetectChangePromptSection(intent);
+    if (detectChangeSection) {
+      prompt = this.appendOptionalPromptSection(prompt, detectChangeSection, tokenSettings.tokenBudget, modelId);
+    }
 
     return prompt;
   }
@@ -692,6 +726,143 @@ export class CodeGraphAgentParticipant {
     };
   }
 
+  private resolveSymbolTarget(intent: WorkflowIntent, _requestOrPrompt?: vscode.ChatRequest | string): string | undefined {
+    const target = intent.target?.trim();
+    if (!target) {
+      return undefined;
+    }
+    if (intent.targetType === 'symbol') {
+      return target;
+    }
+    const detectedType = getTargetType(target, intent.workflow);
+    return detectedType === 'symbol' || SIMPLE_SYMBOL_PATTERN.test(target) ? target : undefined;
+  }
+
+  private hasSymbolTarget(intent: WorkflowIntent): boolean {
+    return Boolean(this.resolveSymbolTarget(intent, intent.rawPrompt));
+  }
+
+  private requiresSymbolTarget(kind: CodeGraphToolKind): boolean {
+    return kind === 'callers' || kind === 'callees' || kind === 'impact' || kind === 'node';
+  }
+
+  private resolveRequiredToolKinds(intent: WorkflowIntent): CodeGraphToolKind[] {
+    const symbolTarget = this.hasSymbolTarget(intent);
+    return WORKFLOW_DEFINITIONS[intent.workflow].toolPlan
+      .filter((step) => step.required)
+      .map((step) => step.toolKind)
+      .filter((kind) => !this.requiresSymbolTarget(kind) || symbolTarget);
+  }
+
+  private buildGroundingQuery(intent: WorkflowIntent, request: vscode.ChatRequest): string {
+    const rawPrompt = request.prompt.trim();
+    const target = intent.target?.trim();
+    const normalizedPrompt = rawPrompt.replace(/\s+/g, ' ').trim();
+    const promptWithoutCommand = normalizedPrompt.replace(/^\/[a-z_]+\b/iu, '').trim();
+
+    if (intent.targetType === 'diff') {
+      const workspaceRoot = getWorkspaceRoot();
+      const changedFiles = isInsideGitWorkTree(workspaceRoot)
+        ? getWorkingTreeChangeContext(workspaceRoot, {
+            maxFiles: intent.contextMode === 'compact' ? 8 : intent.contextMode === 'full' ? 24 : 16,
+            previewChars: 600,
+          }).changedFiles
+        : [];
+      const focus = truncateForTokenMode(promptWithoutCommand || normalizedPrompt, 240);
+      return [
+        `${WORKFLOW_DEFINITIONS[intent.workflow].label}: ${target ?? 'working tree diff'}`,
+        changedFiles.length > 0 ? `Changed files:\n${changedFiles.map((file) => `- ${file}`).join('\n')}` : undefined,
+        focus && focus !== target ? `Focus: ${focus}` : undefined,
+      ].filter(Boolean).join('\n');
+    }
+
+    if (intent.targetType === 'selection') {
+      return [
+        `${WORKFLOW_DEFINITIONS[intent.workflow].label}: selected code`,
+        truncateForTokenMode(target ?? normalizedPrompt, 1200),
+      ].join('\n');
+    }
+
+    if (intent.targetType === 'file') {
+      return [
+        `${WORKFLOW_DEFINITIONS[intent.workflow].label}: ${target ?? 'current file'}`,
+        promptWithoutCommand ? `Focus: ${truncateForTokenMode(promptWithoutCommand, 240)}` : undefined,
+      ].filter(Boolean).join('\n');
+    }
+
+    return [target, truncateForTokenMode(normalizedPrompt, 400)].filter(Boolean).join('\n') || 'current workspace';
+  }
+
+  private getExploreMaxFiles(contextMode: WorkflowIntent['contextMode']): number {
+    switch (contextMode) {
+      case 'compact':
+        return 5;
+      case 'full':
+        return 10;
+      case 'balanced':
+      default:
+        return 8;
+    }
+  }
+
+  private getRelationshipLimit(contextMode: WorkflowIntent['contextMode']): number {
+    switch (contextMode) {
+      case 'compact':
+        return 10;
+      case 'full':
+        return 20;
+      case 'balanced':
+      default:
+        return 14;
+    }
+  }
+
+  private getDiffPreviewCharLimit(contextMode: WorkflowIntent['contextMode']): number {
+    switch (contextMode) {
+      case 'compact':
+        return 2200;
+      case 'full':
+        return 7000;
+      case 'balanced':
+      default:
+        return 4200;
+    }
+  }
+
+  private buildDetectChangePromptSection(intent: WorkflowIntent): string | undefined {
+    if (intent.workflow !== 'detect_change') {
+      return undefined;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    if (!isInsideGitWorkTree(workspaceRoot) || !hasWorkingTreeDiff(workspaceRoot)) {
+      return 'Working tree diff context: no tracked or untracked git changes were detected.';
+    }
+
+    const changeContext = getWorkingTreeChangeContext(workspaceRoot, {
+      maxFiles: intent.contextMode === 'compact' ? 12 : intent.contextMode === 'full' ? 40 : 24,
+      previewChars: this.getDiffPreviewCharLimit(intent.contextMode),
+    });
+
+    const changedFilesSection = changeContext.changedFiles.length > 0
+      ? changeContext.changedFiles.map((file) => `- ${file}`).join('\n')
+      : '- No changed files detected.';
+
+    return [
+      'Working tree diff context:',
+      `Changed files (${changeContext.changedFiles.length}):`,
+      changedFilesSection,
+      '',
+      'Diff stat:',
+      changeContext.diffStat.trim() || '(no diff stat available)',
+      '',
+      'Diff preview:',
+      changeContext.diffPreview.trim() || '(no diff preview available)',
+      '',
+      'Treat the git diff context above as primary evidence for what changed before inferring blast radius.',
+    ].join('\n');
+  }
+
   private buildCodeGraphToolInput(
     kind: CodeGraphToolKind,
     intent: WorkflowIntent,
@@ -699,7 +870,9 @@ export class CodeGraphAgentParticipant {
   ): Record<string, unknown> {
     const workspaceRoot = getWorkspaceRoot();
     const target = intent.target ?? (request.prompt.trim() || 'current workspace');
-    const query = [intent.target, request.prompt.trim()].filter(Boolean).join('\n') || target;
+    const query = this.buildGroundingQuery(intent, request);
+    const symbolTarget = this.resolveSymbolTarget(intent, request) ?? target;
+    const relationshipLimit = this.getRelationshipLimit(intent.contextMode);
 
     switch (kind) {
       case 'status':
@@ -707,16 +880,16 @@ export class CodeGraphAgentParticipant {
       case 'files':
         return { format: 'tree', maxDepth: 4, projectPath: workspaceRoot };
       case 'explore':
-        return { query, maxFiles: intent.contextMode === 'full' ? 12 : 8, projectPath: workspaceRoot };
+        return { query, maxFiles: this.getExploreMaxFiles(intent.contextMode), projectPath: workspaceRoot };
       case 'search':
-        return { query: target, limit: 12, projectPath: workspaceRoot };
+        return { query: symbolTarget, limit: relationshipLimit, projectPath: workspaceRoot };
       case 'callers':
       case 'callees':
-        return { symbol: target, limit: 20, projectPath: workspaceRoot };
+        return { symbol: symbolTarget, limit: relationshipLimit, projectPath: workspaceRoot };
       case 'impact':
-        return { symbol: target, depth: 2, projectPath: workspaceRoot };
+        return { symbol: symbolTarget, depth: intent.contextMode === 'full' ? 3 : 2, projectPath: workspaceRoot };
       case 'node':
-        return { symbol: target, includeCode: true, projectPath: workspaceRoot };
+        return { symbol: symbolTarget, includeCode: true, projectPath: workspaceRoot };
     }
   }
 
@@ -732,6 +905,12 @@ export class CodeGraphAgentParticipant {
 
   private getToolResultText(result: vscode.LanguageModelToolResultPart): string {
     return this.getToolResultContentText(result.content);
+  }
+
+  private detectToolKind(toolName: string): CodeGraphToolKind | undefined {
+    const normalizedName = this.normalizeToolName(toolName);
+    const orderedKinds = Object.keys(TOOL_ALIASES) as CodeGraphToolKind[];
+    return orderedKinds.find((kind) => TOOL_ALIASES[kind].some((alias) => this.toolNameHasHint(normalizedName, alias)));
   }
 
   private getToolResultContentText(content: Array<vscode.LanguageModelTextPart | vscode.LanguageModelPromptTsxPart | vscode.LanguageModelDataPart | unknown>): string {
@@ -775,6 +954,149 @@ export class CodeGraphAgentParticipant {
     }
   }
 
+  private resolveGroundingToolKinds(intent: WorkflowIntent): CodeGraphToolKind[] {
+    const definition = WORKFLOW_DEFINITIONS[intent.workflow];
+    const requiredKinds = this.resolveRequiredToolKinds(intent);
+    const optionalKinds = definition.toolPlan
+      .filter((step) => !step.required)
+      .map((step) => step.toolKind);
+    const symbolTarget = this.hasSymbolTarget(intent);
+    const resolvedKinds = [...requiredKinds];
+
+    for (const kind of optionalKinds) {
+      if (kind === 'impact' && !symbolTarget) {
+        continue;
+      }
+      if ((kind === 'callers' || kind === 'callees' || kind === 'node') && !symbolTarget) {
+        continue;
+      }
+      if (intent.workflow === 'explain' && (kind === 'callers' || kind === 'callees' || kind === 'node')) {
+        resolvedKinds.push(kind);
+        continue;
+      }
+      if (intent.workflow !== 'review' && intent.workflow !== 'detect_change') {
+        resolvedKinds.push(kind);
+      }
+    }
+
+    return Array.from(new Set(resolvedKinds));
+  }
+
+  private summarizeToolResultForChat(
+    toolName: string,
+    kind: CodeGraphToolKind | undefined,
+    text: string,
+    intent: WorkflowIntent,
+  ): string {
+    const effectiveKind = kind ?? 'explore';
+    const limit = GROUNDING_CHAR_LIMITS[effectiveKind][intent.contextMode];
+    const summarized = this.summarizeGroundingText(effectiveKind, text, limit, intent.contextMode);
+    return [`Tool: ${toolName}`, kind ? `Kind: ${kind}` : undefined, summarized || '(no text result)']
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private buildToolResultPartForChat(
+    result: vscode.LanguageModelToolResultPart,
+    toolName: string,
+    intent: WorkflowIntent,
+  ): { part: vscode.LanguageModelToolResultPart; contextText: string; kind?: CodeGraphToolKind } {
+    const kind = this.detectToolKind(toolName);
+    const text = this.getToolResultText(result);
+    const summarizedText = this.summarizeToolResultForChat(toolName, kind, text, intent);
+    return {
+      kind,
+      contextText: summarizedText,
+      part: new vscode.LanguageModelToolResultPart(result.callId, [
+        new vscode.LanguageModelTextPart(summarizedText),
+      ]),
+    };
+  }
+
+  private getGroundingEvidenceLimit(
+    initialPrompt: string,
+    intent: WorkflowIntent,
+    modelId?: string,
+  ): number {
+    const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
+    const initialTokens = estimateTokens(initialPrompt, modelId).tokens;
+    const responseReserve = Math.max(
+      GROUNDING_RESPONSE_RESERVE_TOKENS,
+      Math.floor(tokenSettings.tokenBudget * GROUNDING_RESPONSE_RESERVE_RATIO),
+    );
+    const availableTokens = Math.max(500, tokenSettings.tokenBudget - initialTokens - responseReserve);
+    return Math.max(1200, availableTokens * 4);
+  }
+
+  private truncateMiddle(text: string, limit: number): string {
+    if (text.length <= limit) {
+      return text;
+    }
+    const head = Math.max(120, Math.floor(limit * 0.7));
+    const tail = Math.max(80, limit - head - 20);
+    return `${text.slice(0, head)}\n...[truncated]...\n${text.slice(-tail)}`;
+  }
+
+  private summarizeGroundingText(
+    kind: CodeGraphToolKind,
+    text: string,
+    limit: number,
+    contextMode: WorkflowIntent['contextMode'],
+  ): string {
+    const cleaned = text
+      .replace(/\r/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (cleaned.length <= limit) {
+      return cleaned;
+    }
+
+    const baseLimit = Math.max(240, Math.min(limit, GROUNDING_CHAR_LIMITS[kind][contextMode]));
+    if (kind === 'explore' || kind === 'node') {
+      return this.truncateMiddle(cleaned, baseLimit);
+    }
+
+    return truncateForTokenMode(cleaned, baseLimit);
+  }
+
+  private buildGroundedEvidence(
+    toolResults: GroundedToolResult[],
+    intent: WorkflowIntent,
+    initialPrompt: string,
+    modelId?: string,
+  ): { promptText: string; contextText: string } {
+    let remainingChars = this.getGroundingEvidenceLimit(initialPrompt, intent, modelId);
+    const renderedBlocks: string[] = [];
+    const contextParts: string[] = [];
+
+    for (const result of toolResults) {
+      if (remainingChars < 240) {
+        break;
+      }
+
+      const limit = Math.min(GROUNDING_CHAR_LIMITS[result.kind][intent.contextMode], remainingChars);
+      const summarized = this.summarizeGroundingText(result.kind, result.text, limit, intent.contextMode);
+      if (!summarized.trim()) {
+        continue;
+      }
+
+      const block = [
+        `Tool: ${result.toolName}`,
+        `Kind: ${result.kind}`,
+        summarized,
+      ].join('\n');
+
+      renderedBlocks.push(block);
+      contextParts.push(summarized);
+      remainingChars -= block.length + 2;
+    }
+
+    return {
+      promptText: renderedBlocks.join('\n\n'),
+      contextText: contextParts.join('\n\n'),
+    };
+  }
+
   private async sendGroundedModelRequest(
     request: vscode.ChatRequest,
     chatContext: vscode.ChatContext,
@@ -791,17 +1113,16 @@ export class CodeGraphAgentParticipant {
       initialPrompt += `\n\nMandatory Requirement: Generate exactly one fenced code block using \`\`\`mermaid of type: **${diagramType}**.`;
     }
     const toolResults = await this.collectGroundingToolResults(selectedTools, intent, request, token);
-    const toolResultTexts = toolResults.map((result) => result.text).filter((text) => text.trim().length > 0);
+    const groundingEvidence = this.buildGroundedEvidence(toolResults, intent, initialPrompt, model.id);
+    const toolResultTexts = groundingEvidence.contextText
+      ? groundingEvidence.contextText.split(/\n{2,}/).filter((text) => text.trim().length > 0)
+      : [];
     const groundedPrompt = [
       initialPrompt,
       '',
       'CodeBrain MCP tool results:',
-      toolResults.length > 0
-        ? toolResults.map((result) => [
-            `Tool: ${result.toolName}`,
-            `Kind: ${result.kind}`,
-            result.text || '(no text result)',
-          ].join('\n')).join('\n\n')
+      groundingEvidence.promptText
+        ? groundingEvidence.promptText
         : 'No CodeGraph tools were available for this workflow.',
       '',
       'Use the MCP tool results above as the repository evidence. Answer now without requesting tool calls.',
@@ -834,7 +1155,7 @@ export class CodeGraphAgentParticipant {
     await this.appendContextAnalysisReport({
       stream,
       intent,
-      optimizedContext: toolResultTexts.join('\n\n') || finalText,
+      optimizedContext: groundingEvidence.contextText || finalText,
       toolResultTexts,
     });
 
@@ -858,10 +1179,7 @@ export class CodeGraphAgentParticipant {
     request: vscode.ChatRequest,
     token: vscode.CancellationToken,
   ): Promise<GroundedToolResult[]> {
-    const requiredKinds = WORKFLOW_DEFINITIONS[intent.workflow].toolPlan
-      .filter((step) => step.required)
-      .map((step) => step.toolKind);
-    const toolKinds = requiredKinds.length > 0 ? requiredKinds : WORKFLOW_DEFINITIONS[intent.workflow].mcpToolsRequired.slice(0, 2);
+    const toolKinds = this.resolveGroundingToolKinds(intent);
     const results: GroundedToolResult[] = [];
 
     for (const kind of toolKinds) {
@@ -907,11 +1225,13 @@ export class CodeGraphAgentParticipant {
     }
     const messages = [vscode.LanguageModelChatMessage.User(initialPrompt)];
     const state = this.getOrCreateState(request);
+    this.updateConversationState(state, intent);
     const toolResultContextParts: string[] = [];
     let totalToolCalls = 0;
+    const executedKinds = new Set<CodeGraphToolKind>();
 
     for (let round = 0; round < MAX_TOOL_CALL_ROUNDS; round += 1) {
-      const toolSelection = this.selectToolsForRound(selectedTools, intent, request, round);
+      const toolSelection = this.selectToolsForRound(selectedTools, intent, request, round, executedKinds);
       const response = await model.sendRequest(
         messages,
         {
@@ -934,6 +1254,16 @@ export class CodeGraphAgentParticipant {
       }
 
       if (toolCalls.length === 0) {
+        const missingRequiredKinds = this.resolveRequiredToolKinds(intent).filter((kind) => !executedKinds.has(kind));
+        if (missingRequiredKinds.length > 0 && round < MAX_TOOL_CALL_ROUNDS - 1) {
+          messages.push(
+            vscode.LanguageModelChatMessage.User(
+              `Before answering, call the selected CodeGraph tool for required evidence: ${missingRequiredKinds[0]}.`,
+            ),
+          );
+          continue;
+        }
+
         const text = responseParts
           .filter((part) => part instanceof vscode.LanguageModelTextPart)
           .map((part) => part.value)
@@ -974,10 +1304,21 @@ export class CodeGraphAgentParticipant {
 
       totalToolCalls += toolCalls.length;
       messages.push(vscode.LanguageModelChatMessage.Assistant(responseParts));
+      toolCalls.forEach((toolCall) => {
+        const kind = this.detectToolKind(toolCall.name);
+        if (kind) {
+          executedKinds.add(kind);
+        }
+      });
       const toolResults = await Promise.all(
         toolCalls.map((toolCall) => this.invokeToolForModel(toolCall, request, token)),
       );
-      const toolResultTexts = toolResults.map((result) => this.getToolResultText(result)).filter((text) => text.trim().length > 0);
+      const summarizedResults = toolResults.map((result, index) =>
+        this.buildToolResultPartForChat(result, toolCalls[index]?.name ?? 'unknown_tool', intent),
+      );
+      const toolResultTexts = summarizedResults
+        .map((result) => result.contextText)
+        .filter((text) => text.trim().length > 0);
       toolResultContextParts.push(...toolResultTexts);
       
       // Phase 4: Stateful Tracking
@@ -985,7 +1326,7 @@ export class CodeGraphAgentParticipant {
         if (text.length > 0) state.toolResultSummary.push(text.slice(0, 100)); // Keep short summaries
       });
 
-      messages.push(vscode.LanguageModelChatMessage.User(toolResults));
+      messages.push(vscode.LanguageModelChatMessage.User(summarizedResults.map((result) => result.part)));
     }
 
     messages.push(
@@ -1027,7 +1368,12 @@ export class CodeGraphAgentParticipant {
     request: vscode.ChatRequest,
     stream: vscode.ChatResponseStream,
   ): vscode.ChatResult | undefined {
-    if (request.prompt.trim() || request.references.length > 0 || request.toolReferences.length > 0) {
+    if (
+      request.prompt.trim() ||
+      request.references.length > 0 ||
+      request.toolReferences.length > 0 ||
+      normalizeSlashCommand(request.command)
+    ) {
       return undefined;
     }
 
@@ -1086,13 +1432,14 @@ export class CodeGraphAgentParticipant {
     }
   }
 
-  private maybeHandleReviewSlashCommand(
+  private async maybeHandleReviewSlashCommand(
     request: vscode.ChatRequest,
     intent: WorkflowIntent,
     stream: vscode.ChatResponseStream,
-  ): vscode.ChatResult | undefined {
+  ): Promise<vscode.ChatResult | undefined> {
     const prompt = request.prompt.trim();
-    const isReviewSlashCommand = /^\/review\b/iu.test(prompt);
+    const normalizedCommand = normalizeSlashCommand(request.command);
+    const isReviewSlashCommand = normalizedCommand === 'review' || /^\/review\b/iu.test(prompt);
     if (!isReviewSlashCommand || intent.workflow !== 'review') {
       return undefined;
     }
@@ -1114,7 +1461,7 @@ export class CodeGraphAgentParticipant {
       return { metadata: { handledBy: 'reviewSlashRedirectSkippedNoDiff' } };
     }
 
-    void vscode.commands.executeCommand('codebrain.prReview', hasExplicitReviewTarget ? requestedTarget : undefined);
+    await vscode.commands.executeCommand('codebrain.prReview', hasExplicitReviewTarget ? requestedTarget : undefined);
     stream.markdown('Opening CodeBrain review flow...');
     return { metadata: { handledBy: 'reviewSlashRedirectedToPrReview' } };
   }
@@ -1147,7 +1494,7 @@ export class CodeGraphAgentParticipant {
         return clarification;
       }
 
-      const reviewRedirect = this.maybeHandleReviewSlashCommand(request, intent, stream);
+      const reviewRedirect = await this.maybeHandleReviewSlashCommand(request, intent, stream);
       if (reviewRedirect) {
         return reviewRedirect;
       }

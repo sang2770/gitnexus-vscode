@@ -32,7 +32,7 @@ export const DEFAULT_CHAT_OPTIMIZATION_CONFIG: ChatOptimizationConfig = {
   
   cacheTtlMs: 10 * 60 * 1000, // 10 minutes
   
-  maxToolsRound0: 2,
+  maxToolsRound0: 3,
   maxToolsTotal: 6,
   
   maxHistoryTurns: 4,
