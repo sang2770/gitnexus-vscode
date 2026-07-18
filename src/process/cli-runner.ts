@@ -233,5 +233,7 @@ export async function ensureCodeBrainCliInstalled(
 }
 
 export function getWorkspaceRoot(): string {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
+  const activeResource = vscode.window.activeTextEditor?.document.uri;
+  const activeFolder = activeResource ? vscode.workspace.getWorkspaceFolder(activeResource) : undefined;
+  return activeFolder?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
 }

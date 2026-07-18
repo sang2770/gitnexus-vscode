@@ -21,6 +21,9 @@ The result is a safer AI workflow for onboarding, refactoring, reviewing, and va
 
 | Workflow | Use it for | Output |
 | --- | --- | --- |
+| `@CodeBrain /develop` | Take a feature or ticket from requirement to an Agent-ready implementation path. | Current behavior, impact, minimal plan, implementation task, and verification. |
+| `@CodeBrain /fix` | Diagnose a failure or regression before proposing a change. | Evidence, root-cause confidence, minimal fix task, and regression coverage. |
+| `@CodeBrain /verify` | Validate a diff, file, or symbol after implementation. | Affected tests, narrow-to-broad checks, and residual risk. |
 | `@CodeBrain /architecture` | Understand a new repository or module area. | Architecture map, components, relationships, and risks. |
 | `@CodeBrain /explain` | Understand a file, symbol, or execution flow. | Step-by-step behavior, data flow, callers/callees, and recommendations. |
 | `@CodeBrain /impact` | Check blast radius before changing APIs or shared code. | Direct and indirect dependents, affected modules, risk level, and validation scope. |
@@ -232,7 +235,14 @@ codebrain-vscode.vsix
 
 ## Recommended Developer Workflow
 
-Use CodeBrain as a safety layer around normal AI-assisted development:
+For most work, use one short entry point and follow the suggested actions in chat:
+
+```text
+/develop <feature or ticket> -> Agent implementation -> /verify -> /review
+/fix <symptom or regression> -> Agent fix -> /verify -> /review
+```
+
+The lower-level commands remain available when you need direct analysis:
 
 1. Understand the current flow with `/explain`.
 2. Check blast radius with `/impact`.

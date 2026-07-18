@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { encoding_for_model, type Tiktoken } from 'tiktoken';
+import { encoding_for_model, type Tiktoken } from '@dqbd/tiktoken';
 
 export interface ContextAnalysisReport {
   repositoryFiles: number;
@@ -53,6 +53,10 @@ const REPOSITORY_EXCLUDE_GLOB = [
   '**/*.gif',
   '**/*.webp',
   '**/*.ico',
+  '**/.env',
+  '**/.env.*',
+  '**/*secret*',
+  '**/*credentials*',
   '**/*.pdf',
   '**/*.zip',
   '**/*.gz',
@@ -72,7 +76,6 @@ const TEXT_EXTENSIONS = new Set([
   '.css',
   '.csv',
   '.cts',
-  '.env',
   '.go',
   '.h',
   '.html',

@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import {
   ContextAnalysisService,
@@ -10,7 +9,6 @@ import {
 import { getOutputChannel, getWorkspaceRoot } from '../process/cli-runner.js';
 import { getWorkingTreeChangeContext, hasWorkingTreeDiff, isInsideGitWorkTree } from '../process/review-git.js';
 import {
-  buildTokenReductionMarkdown,
   createTokenReductionReport,
   estimateTokens,
   getTokenOptimizationSettings,
@@ -29,17 +27,10 @@ import {
   type IntentTargetType,
   detectLanguage,
 } from '../workflows/intent-resolver.js';
+import { getWorkflowFollowups } from '../workflows/development-lifecycle.js';
 import { chatOptimizationManager } from './chat-optimization-config.js';
 import { buildFallbackMermaidMarkdown, extractMermaidMarkdownFromResponse, writeDiagramPreviewFile } from './diagram-generation.js';
 import { chatMetricsCollector } from './chat-metrics.js';
-
-interface ConversationState {
-  lastIntent?: WorkflowIntent;
-  seenFiles: Set<string>;
-  seenSymbols: Set<string>;
-  toolResultSummary: string[];
-  lastUpdate: number;
-}
 
 type AssistantReplayPart =
   | vscode.LanguageModelTextPart
@@ -53,16 +44,19 @@ interface GroundedToolResult {
 }
 
 const PARTICIPANT_ID = 'codebrain.codegraph';
-const MAX_TOOL_CALL_ROUNDS = 5;
+const MAX_TOOL_CALL_ROUNDS = 3;
 const GROUNDING_RESPONSE_RESERVE_TOKENS = 1200;
 const GROUNDING_RESPONSE_RESERVE_RATIO = 0.18;
 const SIMPLE_SYMBOL_PATTERN = /^[A-Za-z_$][\w$]*$/u;
 const CONTEXT_REPORT_WORKFLOWS = new Set<WorkflowIntent['workflow']>([
   'architecture',
+  'develop',
   'explain',
+  'fix',
   'impact',
   'review',
   'test',
+  'verify',
   'detect_change',
   'plan',
 ]);
@@ -103,6 +97,9 @@ function getTargetType(target: string | undefined | null, workflow: string): Int
   if (workflow === 'review' || workflow === 'detect_change') {
     return 'diff';
   }
+  if (workflow === 'verify' && /\b(diff|changes?|working tree)\b/iu.test(target)) {
+    return 'diff';
+  }
   if (target.includes('.') || target.includes('::') || /^[A-Z]/.test(target)) {
     return 'symbol';
   }
@@ -113,51 +110,10 @@ function getTargetType(target: string | undefined | null, workflow: string): Int
 }
 
 export class CodeGraphAgentParticipant {
-  private conversationStates = new Map<string, ConversationState>();
   private instructionCache = new Map<string, { instructions: string, timestamp: number }>();
   private readonly contextAnalysisService = new ContextAnalysisService();
-  private lastCleanup = Date.now();
 
-  constructor(private readonly context: vscode.ExtensionContext) {
-    // Regular cleanup of old session states
-    setInterval(() => this.cleanupStates(), 15 * 60 * 1000);
-  }
-
-  private cleanupStates(): void {
-    const now = Date.now();
-    const config = chatOptimizationManager.getConfig();
-    for (const [id, state] of this.conversationStates.entries()) {
-      if (now - state.lastUpdate > config.stateCleanupIntervalMs) {
-        this.conversationStates.delete(id);
-      }
-    }
-  }
-
-  private getOrCreateState(request: vscode.ChatRequest): ConversationState {
-    const id = normalizeSlashCommand(request.command) || 'default';
-    let state = this.conversationStates.get(id);
-    if (!state) {
-      state = {
-        seenFiles: new Set(),
-        seenSymbols: new Set(),
-        toolResultSummary: [],
-        lastUpdate: Date.now(),
-      };
-      this.conversationStates.set(id, state);
-    }
-    state.lastUpdate = Date.now();
-    return state;
-  }
-
-  private updateConversationState(state: ConversationState, intent: WorkflowIntent): void {
-    state.lastIntent = intent;
-    if (intent.targetType === 'symbol' && intent.target) {
-      state.seenSymbols.add(intent.target);
-    }
-    if (intent.targetType === 'file' && intent.target) {
-      state.seenFiles.add(intent.target);
-    }
-  }
+  constructor(private readonly context: vscode.ExtensionContext) {}
 
   private resolveIntent(request: vscode.ChatRequest): WorkflowIntent {
     const workspaceRoot = getWorkspaceRoot();
@@ -181,18 +137,21 @@ export class CodeGraphAgentParticipant {
   ): Promise<WorkflowIntent | undefined> {
     const workspaceRoot = getWorkspaceRoot();
     const editorContext = getEditorIntentContext(workspaceRoot);
-    
+
     const classificationPrompt = [
       'You are an intent classifier for CodeBrain, a repository-aware AI coding assistant.',
       'Your task is to classify the user\'s request into one of the following workflows and extract the target symbol, file, or task description.',
       '',
       'Available workflows:',
       '- "architecture": Explain repository architecture, module map, or onboarding.',
+      '- "develop": Implement a feature or ticket using a short end-to-end developer workflow.',
       '- "explain": Explain a symbol (class, function), execution flow, or file.',
+      '- "fix": Diagnose and fix a bug, failure, regression, or incorrect behavior.',
       '- "impact": Analyze the impact, blast radius, callers, or callees of a specific symbol.',
       '- "review": Review current git changes, PRs, or diffs.',
       '- "detect_change": Detect impact/risk of pending changes in the working tree.',
       '- "test": Generate a test plan or test cases for a symbol or behavior.',
+      '- "verify": Validate a diff or completed change with the smallest relevant test scope.',
       '- "diagram": Generate a Mermaid flow diagram, sequence diagram, or chart for a symbol or flow.',
       '- "plan": Generate an implementation plan, fix plan, or task for a bug, feature, or Jira ticket.',
       '',
@@ -206,7 +165,7 @@ export class CodeGraphAgentParticipant {
       '',
       'Respond with a JSON object matching this schema:',
       '{',
-      '  "workflow": "architecture" | "explain" | "impact" | "review" | "detect_change" | "test" | "diagram" | "plan",',
+      '  "workflow": "architecture" | "develop" | "explain" | "fix" | "impact" | "review" | "detect_change" | "test" | "verify" | "diagram" | "plan",',
       '  "target": "string or null"',
       '}',
       'Provide only the JSON object, without any markdown block wrapper or extra text.'
@@ -230,11 +189,14 @@ export class CodeGraphAgentParticipant {
       const parsed = JSON.parse(cleaned);
       const VALID_WORKFLOWS = new Set([
         'architecture',
+        'develop',
         'explain',
+        'fix',
         'impact',
         'review',
         'detect_change',
         'test',
+        'verify',
         'diagram',
         'plan',
       ]);
@@ -266,7 +228,7 @@ export class CodeGraphAgentParticipant {
     const config = chatOptimizationManager.getConfig();
     const lang = detectLanguage(intent.rawPrompt);
     const cacheKey = `${intent.workflow}_${intent.contextMode}_${compact ? 'compact' : 'full'}_${lang}`;
-    
+
     if (config.enableInstructionCaching) {
       const cached = this.instructionCache.get(cacheKey);
       if (cached && (Date.now() - cached.timestamp < config.cacheTtlMs)) {
@@ -274,21 +236,16 @@ export class CodeGraphAgentParticipant {
       }
     }
 
-    const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
     const langNames = { vi: 'Vietnamese', ko: 'Korean', en: 'English' };
     const targetLangName = langNames[lang];
     const workflowSections = getWorkflowResponseSections(intent.workflow, lang).join(' -> ');
-    
+
     if (compact) {
-      // Very brief instructions for follow-up turns
       const instructions = [
-        `CodeBrain follow-up (${intent.workflow})`,
-        `Workspace: ${getWorkspaceRoot()}`,
-        `Context: ${intent.contextMode}`,
-        'Continue using CodeGraph tools.',
-        `Maintain workflow output using only these sections: ${workflowSections}.`,
-        'Do not add generic sections like Context, Findings, or Plan/Task unless they are part of the workflow schema.',
-        `Mandatory: Respond entirely in ${targetLangName}.`,
+        `CodeBrain follow-up: ${intent.workflow}; target: ${intent.target ?? 'current context'}.`,
+        'Use supplied CodeGraph evidence; mark missing evidence; do not edit files.',
+        `Sections only: ${workflowSections || 'requested output'}.`,
+        `Respond in ${targetLangName}.`,
       ].join('\n');
 
       if (config.enableInstructionCaching) {
@@ -297,25 +254,9 @@ export class CodeGraphAgentParticipant {
       return instructions;
     }
 
-    const definition = WORKFLOW_DEFINITIONS[intent.workflow];
-    const supplementalHints = definition.supplementalMcpToolHints ?? [];
-    const toolScope = supplementalHints.length > 0
-      ? `Use the selected CodeGraph MCP tools plus matching supplemental MCP context tools for this workflow. Supplemental hints: ${supplementalHints.join(', ')}.`
-      : 'Use only the CodeGraph MCP tools selected for this workflow unless a later tool result proves a narrower follow-up is necessary.';
-    
     const instructions = [
       buildWorkflowInstructions(intent),
-      '',
-      'Token optimization settings:',
-      `- Configured mode: ${tokenSettings.configuredMode}`,
-      `- Effective mode: ${tokenSettings.effectiveMode}`,
-      `- Enabled: ${tokenSettings.enabled ? 'yes' : 'no'}`,
-      `- Target budget: ${tokenSettings.tokenBudget} tokens`,
-      '',
-      `Workspace path: ${getWorkspaceRoot()}`,
-      toolScope,
-      '',
-      `Mandatory: Respond entirely in ${targetLangName} (including session headers and section titles).`,
+      `Respond entirely in ${targetLangName}.`,
     ].join('\n');
 
     if (config.enableInstructionCaching) {
@@ -436,12 +377,12 @@ export class CodeGraphAgentParticipant {
         toolMode: attachedTools.length === 1 ? vscode.LanguageModelChatToolMode.Required : vscode.LanguageModelChatToolMode.Auto,
       };
     }
-    
+
     // Phase 2: Progressive Tool Selection
     if (config.enableProgressiveTools && round === 0) {
       const requiredKinds = this.resolveRequiredToolKinds(intent).filter((kind) => !executedKinds.has(kind));
       const essentialTools: vscode.LanguageModelToolInformation[] = [];
-      
+
       // Include as many required steps as round 0 can support so explain/review start with enough evidence.
       for (const kind of requiredKinds.slice(0, Math.max(1, config.maxToolsRound0))) {
         const tool = this.selectCodeGraphToolByKind(allTools, kind);
@@ -449,7 +390,7 @@ export class CodeGraphAgentParticipant {
           essentialTools.push(tool);
         }
       }
-      
+
       // Add a generic search/explore if not already there and limit is not reached
       if (essentialTools.length < config.maxToolsRound0) {
         const explore = this.selectCodeGraphToolByKind(allTools, 'explore');
@@ -464,7 +405,7 @@ export class CodeGraphAgentParticipant {
         );
         essentialTools.push(...supps);
       }
-      
+
       if (essentialTools.length > 0) {
         const tools = this.dedupeTools(essentialTools).slice(0, config.maxToolsTotal);
         return {
@@ -516,28 +457,66 @@ export class CodeGraphAgentParticipant {
     return haystack.includes('gemini') || haystack.includes('google');
   }
 
+  private buildReferenceBlock(request: vscode.ChatRequest): string | undefined {
+    if (request.references.length === 0) {
+      return undefined;
+    }
+
+    const workspaceRoot = getWorkspaceRoot();
+    const references = request.references.slice(0, 8).map((reference) => {
+      const description = reference.modelDescription?.trim();
+      const value = reference.value;
+      let renderedValue: string;
+
+      if (value instanceof vscode.Uri) {
+        renderedValue = this.toWorkspaceDisplayPath(value, workspaceRoot);
+      } else if (value instanceof vscode.Location) {
+        const location = this.toWorkspaceDisplayPath(value.uri, workspaceRoot);
+        renderedValue = `${location}:${value.range.start.line + 1}`;
+      } else if (typeof value === 'string') {
+        renderedValue = truncateForTokenMode(value, 300);
+      } else {
+        renderedValue = reference.id;
+      }
+
+      return `- ${description ? `${description}: ` : ''}${renderedValue}`;
+    });
+
+    return ['Attached references (paths/descriptions only):', ...references].join('\n');
+  }
+
+  private toWorkspaceDisplayPath(uri: vscode.Uri, workspaceRoot: string): string {
+    if (uri.scheme !== 'file') {
+      return uri.toString();
+    }
+    const relative = path.relative(workspaceRoot, uri.fsPath);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative)
+      ? relative.replace(/\\/g, '/')
+      : uri.fsPath;
+  }
+
   private buildInitialPrompt(
     request: vscode.ChatRequest,
     chatContext: vscode.ChatContext,
     intent: WorkflowIntent,
     modelId?: string,
-  ): string {
-    const config = chatOptimizationManager.getConfig();
-    const historyWindow = chatContext.history.slice(-8);
-    const isFollowUp = historyWindow.length > 0;
-    
+  ): { prompt: string; tokensSaved: number } {
     const tokenSettings = getTokenOptimizationSettings(intent.contextMode);
+    const historyWindow = chatContext.history.slice(-tokenSettings.historyTurnLimit);
+    const isFollowUp = historyWindow.length > 0;
+    const referenceBlock = this.buildReferenceBlock(request);
+    const requestPrompt = [request.prompt, referenceBlock].filter(Boolean).join('\n\n');
     const instructions = this.buildInstructions(intent, isFollowUp);
     const optimizedPrompt = this.buildOptimizedPrompt({
       instructions,
-      requestPrompt: request.prompt,
+      requestPrompt,
       history: historyWindow,
       tokenSettings,
       modelId,
     });
     const beforePrompt = this.composePromptSections({
       instructions,
-      requestPrompt: request.prompt,
+      requestPrompt,
       history: this.buildHistoryBlock(historyWindow, 1600),
     });
     const report = createTokenReductionReport({
@@ -547,18 +526,13 @@ export class CodeGraphAgentParticipant {
       source: 'chat-initial-prompt',
       modelId,
     });
-    let prompt = this.appendOptionalPromptSection(
-      optimizedPrompt.prompt,
-      buildTokenReductionMarkdown(report),
-      tokenSettings.tokenBudget,
-      modelId,
-    );
+    let prompt = optimizedPrompt.prompt;
     const detectChangeSection = this.buildDetectChangePromptSection(intent);
     if (detectChangeSection) {
       prompt = this.appendOptionalPromptSection(prompt, detectChangeSection, tokenSettings.tokenBudget, modelId);
     }
 
-    return prompt;
+    return { prompt, tokensSaved: report.reductionTokens };
   }
 
   private buildOptimizedPrompt(input: {
@@ -574,22 +548,16 @@ export class CodeGraphAgentParticipant {
   } {
     const config = chatOptimizationManager.getConfig();
     const enabled = input.tokenSettings.enabled && config.enableSmartHistory;
-    
+
     // Phase 3: Smart History Management
-    let recentHistory = input.history;
-    if (enabled && config.historyRelevanceFiltering) {
-      recentHistory = recentHistory.filter(turn => {
-        if (turn instanceof vscode.ChatRequestTurn) {
-          return turn.prompt.includes('@CodeBrain') || turn.command !== undefined;
-        }
-        return true; // Keep assistant responses for context
-      });
-    }
+    const recentHistory = input.history;
 
     const maxHistoryTurns = enabled
-      ? Math.min(config.maxHistoryTurns, recentHistory.length)
+      ? Math.min(input.tokenSettings.historyTurnLimit, recentHistory.length)
       : recentHistory.length;
-    const maxCharsPerTurn = enabled ? config.historyCharsPerTurn : 1600;
+    const maxCharsPerTurn = enabled
+      ? Math.min(config.historyCharsPerTurn, input.tokenSettings.historyCharsPerTurn)
+      : 1600;
     const minCharsPerTurn = enabled
       ? Math.max(120, Math.floor(input.tokenSettings.historyCharsPerTurn / 3))
       : maxCharsPerTurn;
@@ -674,7 +642,11 @@ export class CodeGraphAgentParticipant {
       return `User: ${truncateForTokenMode(turn.prompt, maxChars)}`;
     }
     if (turn instanceof vscode.ChatResponseTurn) {
-      return `Assistant: ${truncateForTokenMode(turn.response.map((part) => String(part)).join(' '), maxChars)}`;
+      const markdown = turn.response
+        .filter((part): part is vscode.ChatResponseMarkdownPart => part instanceof vscode.ChatResponseMarkdownPart)
+        .map((part) => part.value.value)
+        .join(' ');
+      return markdown ? `Assistant: ${truncateForTokenMode(markdown, maxChars)}` : '';
     }
     return '';
   }
@@ -1097,6 +1069,22 @@ export class CodeGraphAgentParticipant {
     };
   }
 
+  private buildSuccessResult(
+    intent: WorkflowIntent,
+    tokensSaved: number,
+    toolCalls: number,
+  ): vscode.ChatResult {
+    return {
+      metadata: {
+        handledBy: 'codebrainWorkflow',
+        workflow: intent.workflow,
+        target: intent.target,
+        tokensSaved,
+        toolCalls,
+      },
+    };
+  }
+
   private async sendGroundedModelRequest(
     request: vscode.ChatRequest,
     chatContext: vscode.ChatContext,
@@ -1108,7 +1096,8 @@ export class CodeGraphAgentParticipant {
     diagramType?: string,
   ): Promise<vscode.ChatResult> {
     const startTime = Date.now();
-    let initialPrompt = this.buildInitialPrompt(request, chatContext, intent, model.id);
+    const initialPromptBuild = this.buildInitialPrompt(request, chatContext, intent, model.id);
+    let initialPrompt = initialPromptBuild.prompt;
     if (intent.workflow === 'diagram' && diagramType) {
       initialPrompt += `\n\nMandatory Requirement: Generate exactly one fenced code block using \`\`\`mermaid of type: **${diagramType}**.`;
     }
@@ -1160,17 +1149,17 @@ export class CodeGraphAgentParticipant {
     });
 
     chatMetricsCollector.recordMetric({
-      tokensSaved: 0,
+      tokensSaved: initialPromptBuild.tokensSaved,
       tokensUsed: estimateTokens(groundedPrompt, model.id).tokens,
       responseTimeMs: Date.now() - startTime,
       cacheHits: 0,
-      cacheMisses: 1,
+      cacheMisses: 0,
       toolCallsCount: toolResults.length,
       roundCount: 1,
       workflow: intent.workflow,
     });
 
-    return {};
+    return this.buildSuccessResult(intent, initialPromptBuild.tokensSaved, toolResults.length);
   }
 
   private async collectGroundingToolResults(
@@ -1219,13 +1208,12 @@ export class CodeGraphAgentParticipant {
     }
 
     const startTime = Date.now();
-    let initialPrompt = this.buildInitialPrompt(request, chatContext, intent, model.id);
+    const initialPromptBuild = this.buildInitialPrompt(request, chatContext, intent, model.id);
+    let initialPrompt = initialPromptBuild.prompt;
     if (intent.workflow === 'diagram' && diagramType) {
       initialPrompt += `\n\nMandatory Requirement: Generate exactly one fenced code block using \`\`\`mermaid of type: **${diagramType}**.`;
     }
     const messages = [vscode.LanguageModelChatMessage.User(initialPrompt)];
-    const state = this.getOrCreateState(request);
-    this.updateConversationState(state, intent);
     const toolResultContextParts: string[] = [];
     let totalToolCalls = 0;
     const executedKinds = new Set<CodeGraphToolKind>();
@@ -1286,20 +1274,20 @@ export class CodeGraphAgentParticipant {
           optimizedContext: toolResultContextParts.join('\n\n') || text,
           toolResultTexts: toolResultContextParts,
         });
-        
+
         // Record metrics
         chatMetricsCollector.recordMetric({
-          tokensSaved: 0, // Should calculate based on optimization logic
-          tokensUsed: estimateTokens(messages.map(m => String(m)).join(''), model.id).tokens,
+          tokensSaved: initialPromptBuild.tokensSaved,
+          tokensUsed: estimateTokens([initialPrompt, ...toolResultContextParts].join('\n'), model.id).tokens,
           responseTimeMs: Date.now() - startTime,
           cacheHits: 0,
-          cacheMisses: 1,
+          cacheMisses: 0,
           toolCallsCount: totalToolCalls,
           roundCount: round,
           workflow: intent.workflow,
         });
-        
-        return {};
+
+        return this.buildSuccessResult(intent, initialPromptBuild.tokensSaved, totalToolCalls);
       }
 
       totalToolCalls += toolCalls.length;
@@ -1320,18 +1308,13 @@ export class CodeGraphAgentParticipant {
         .map((result) => result.contextText)
         .filter((text) => text.trim().length > 0);
       toolResultContextParts.push(...toolResultTexts);
-      
-      // Phase 4: Stateful Tracking
-      toolResultTexts.forEach(text => {
-        if (text.length > 0) state.toolResultSummary.push(text.slice(0, 100)); // Keep short summaries
-      });
 
       messages.push(vscode.LanguageModelChatMessage.User(summarizedResults.map((result) => result.part)));
     }
 
     messages.push(
       vscode.LanguageModelChatMessage.User(
-        'Tool-call budget reached. Use the MCP tool results above to answer now. Include the mandatory CodeBrain v2 context and token-reduction sections. Do not request additional tool calls.',
+        'Tool-call budget reached. Use the evidence above and answer now. Do not request additional tools or add meta sections.',
       ),
     );
     const finalResponse = await model.sendRequest(messages, {
@@ -1361,7 +1344,17 @@ export class CodeGraphAgentParticipant {
       optimizedContext: toolResultContextParts.join('\n\n') || finalText,
       toolResultTexts: toolResultContextParts,
     });
-    return {};
+    chatMetricsCollector.recordMetric({
+      tokensSaved: initialPromptBuild.tokensSaved,
+      tokensUsed: estimateTokens([initialPrompt, ...toolResultContextParts].join('\n'), model.id).tokens,
+      responseTimeMs: Date.now() - startTime,
+      cacheHits: 0,
+      cacheMisses: 0,
+      toolCallsCount: totalToolCalls,
+      roundCount: MAX_TOOL_CALL_ROUNDS,
+      workflow: intent.workflow,
+    });
+    return this.buildSuccessResult(intent, initialPromptBuild.tokensSaved, totalToolCalls);
   }
 
   private maybeHandleEmptyRequest(
@@ -1378,6 +1371,9 @@ export class CodeGraphAgentParticipant {
     }
 
     const examples = [
+      '`@CodeBrain /develop add session timeout`',
+      '`@CodeBrain /fix login returns 500 after token expiry`',
+      '`@CodeBrain /verify working tree diff`',
       '`@CodeBrain /architecture auth module`',
       '`@CodeBrain /explain authentication flow`',
       '`@CodeBrain /impact UserService.authenticate`',
@@ -1557,13 +1553,11 @@ export class CodeGraphAgentParticipant {
 
   getFollowupProvider(): vscode.ChatFollowupProvider {
     return {
-      provideFollowups: () => [
-        { prompt: '/architecture current workspace', label: 'Explain architecture' },
-        { prompt: '/impact selected symbol', label: 'Analyze impact' },
-        { prompt: '/review', label: 'Review changes' },
-        { prompt: '/diagram selected symbol', label: 'Generate diagram' },
-        { prompt: '/plan selected symbol', label: 'Generate plan' },
-      ],
+      provideFollowups: (result) => {
+        const workflow = result.metadata?.workflow as CodeBrainWorkflowKind | undefined;
+        const target = typeof result.metadata?.target === 'string' ? result.metadata.target : undefined;
+        return getWorkflowFollowups(workflow, target);
+      },
     };
   }
 
@@ -1586,6 +1580,6 @@ export const createCodeGraphParticipant = (
   const agent = new CodeGraphAgentParticipant(context);
   const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, agent.getHandler());
   participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.png');
-  // participant.followupProvider = agent.getFollowupProvider();
+  participant.followupProvider = agent.getFollowupProvider();
   return participant;
 };

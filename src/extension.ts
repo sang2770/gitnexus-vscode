@@ -16,10 +16,7 @@ import {
   initializeCodeBrainRuntime,
 } from './process/cli-runner.js';
 import { registerCodeGraphMcpProvider } from './process/mcp-provider.js';
-import {
-  checkForExtensionUpdates,
-  checkForExtensionUpdatesCommand,
-} from './process/update-checker.js';
+import { checkForExtensionUpdatesCommand } from './process/update-checker.js';
 import { StalenessMonitor } from './staleness/staleness-monitor.js';
 import { createCodeGraphParticipant } from './ui/chat-participant.js';
 import { configureReportPanel } from './ui/report-panel.js';
@@ -32,37 +29,10 @@ import {
 import { CodeBrainStatusBar } from './ui/status-bar.js';
 import { AgentsTreeProvider, QuickActionsTreeProvider } from './ui/tree-view.js';
 
-const MARKDOWN_MERMAID_EXTENSION_ID = 'bierner.markdown-mermaid';
-
-async function ensureMarkdownMermaidExtensionInstalled(): Promise<void> {
-  if (vscode.extensions.getExtension(MARKDOWN_MERMAID_EXTENSION_ID)) {
-    return;
-  }
-
-  const action = await vscode.window.showInformationMessage(
-    'CodeBrain: Install Markdown Mermaid to enable Mermaid diagram preview in temporary .md files.',
-    'Install',
-    'Later',
-  );
-
-  if (action !== 'Install' || action === undefined || action === null) {
-    return;
-  }
-
-  try {
-    await vscode.commands.executeCommand('workbench.extensions.installExtension', MARKDOWN_MERMAID_EXTENSION_ID);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    getOutputChannel().appendLine(`Failed to install ${MARKDOWN_MERMAID_EXTENSION_ID}: ${message}`);
-    vscode.window.showWarningMessage(`CodeBrain: Could not auto-install ${MARKDOWN_MERMAID_EXTENSION_ID}.`);
-  }
-}
-
 export function activate(context: vscode.ExtensionContext): void {
   const outputChannel = getOutputChannel();
   initializeCodeBrainRuntime(context.globalStorageUri.fsPath);
   configureReportPanel(context.extensionUri);
-  // void ensureMarkdownMermaidExtensionInstalled();
 
   context.subscriptions.push(registerCodeGraphMcpProvider(context));
   const statusBar = new CodeBrainStatusBar();
@@ -141,6 +111,9 @@ export function activate(context: vscode.ExtensionContext): void {
     ['codebrain.generateFlowDiagram', generateFlowDiagramCommand],
     ['codebrain.prReview', prReviewCommand],
     ['codebrain.workflow.architecture', () => openWorkflowChatCommand('architecture')],
+    ['codebrain.workflow.develop', () => openWorkflowChatCommand('develop')],
+    ['codebrain.workflow.fix', () => openWorkflowChatCommand('fix')],
+    ['codebrain.workflow.verify', () => openWorkflowChatCommand('verify')],
     ['codebrain.workflow.explain', () => openWorkflowChatCommand('explain')],
     ['codebrain.workflow.impact', () => openWorkflowChatCommand('impact')],
     ['codebrain.workflow.review', prReviewCommand],

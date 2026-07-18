@@ -35,7 +35,7 @@ function resolveWorkflowTarget(
   workflow: CodeBrainWorkflowKind,
   editorContext: ReturnType<typeof getEditorIntentContext>,
 ): string | undefined {
-  if (workflow === 'review' || workflow === 'detect_change') {
+  if (workflow === 'review' || workflow === 'detect_change' || workflow === 'verify') {
     return 'working tree diff';
   }
 

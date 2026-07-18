@@ -2,7 +2,7 @@
   "name": "codebrain-vscode",
   "displayName": "CodeBrain",
   "description": "Repository-aware AI workflow orchestration for CodeGraph, Copilot Chat, and MCP.",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "publisher": "codebrain",
   "license": "MIT",
   "repository": {
@@ -85,6 +85,24 @@
         "title": "Workflow: Explain Architecture",
         "category": "CodeBrain",
         "icon": "$(symbol-namespace)"
+      },
+      {
+        "command": "codebrain.workflow.develop",
+        "title": "Workflow: Develop Feature",
+        "category": "CodeBrain",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "codebrain.workflow.fix",
+        "title": "Workflow: Fix Bug",
+        "category": "CodeBrain",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "codebrain.workflow.verify",
+        "title": "Workflow: Verify Change",
+        "category": "CodeBrain",
+        "icon": "$(verified)"
       },
       {
         "command": "codebrain.workflow.explain",
@@ -355,6 +373,18 @@
             "description": "Explain repository architecture with full-mode graph context"
           },
           {
+            "name": "develop",
+            "description": "Develop a feature with CodeGraph impact, implementation, and verification steps"
+          },
+          {
+            "name": "fix",
+            "description": "Diagnose a bug from evidence and produce a minimal fix with regression coverage"
+          },
+          {
+            "name": "verify",
+            "description": "Verify a diff or target with the smallest affected test scope"
+          },
+          {
             "name": "explain",
             "description": "Explain a symbol, flow, or file with compact graph context"
           },
@@ -389,6 +419,7 @@
   "scripts": {
     "vscode:prepublish": "npm run build",
     "compile": "tsc -p ./",
+    "test": "npm run compile && node --test test/*.test.mjs",
     "watch": "tsc -watch -p ./",
     "build-icon": "node scripts/build-icon.mjs",
     "lint": "eslint src --ext ts",
@@ -397,7 +428,7 @@
     "build:codegraph": "npm --prefix codegraph ci && npm --prefix codegraph run build",
     "build:ext": "npm run build-icon && npm run compile",
     "bundle:cli": "node scripts/copy-cli.mjs",
-    "package": "npm run build && vsce package --allow-missing-repository --out codebrain-vscode.vsix"
+    "package": "vsce package --allow-missing-repository --out codebrain-vscode.vsix"
   },
   "devDependencies": {
     "@types/node": "^20.19.39",
@@ -416,7 +447,6 @@
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
     "sigma": "^3.0.3",
-    "strip-ansi": "^7.2.0",
-    "tiktoken": "^1.0.22"
+    "strip-ansi": "^7.2.0"
   }
 }

@@ -267,8 +267,8 @@ function buildDiagramGenerationPrompt(
   toolResults: DiagramGroundedToolResult[],
   diagramType?: string,
 ): string {
-  const typeRequirement = diagramType 
-    ? `- Return exactly one fenced code block using \`\`\`mermaid of type: **${diagramType}**.` 
+  const typeRequirement = diagramType
+    ? `- Return exactly one fenced code block using \`\`\`mermaid of type: **${diagramType}**.`
     : '- Return exactly one fenced code block using ```mermaid.';
 
   return [

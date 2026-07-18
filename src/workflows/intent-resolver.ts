@@ -1,12 +1,16 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { matchesLocalizedWorkflow } from './workflow-keywords.js';
 
 export type CodeBrainWorkflowKind =
   | 'architecture'
+  | 'develop'
   | 'explain'
+  | 'fix'
   | 'impact'
   | 'review'
   | 'test'
+  | 'verify'
   | 'detect_change'
   | 'diagram'
   | 'plan';
@@ -174,6 +178,9 @@ const WORKFLOW_ALIASES: Record<string, CodeBrainWorkflowKind> = {
   arch: 'architecture',
   onboard: 'architecture',
   onboarding: 'architecture',
+  develop: 'develop',
+  feature: 'develop',
+  implement: 'develop',
   explain: 'explain',
   flow: 'explain',
   impact: 'impact',
@@ -195,6 +202,10 @@ const WORKFLOW_ALIASES: Record<string, CodeBrainWorkflowKind> = {
   implementation_plan: 'plan',
   refactor: 'plan',
   debug: 'plan',
+  fix: 'fix',
+  bugfix: 'fix',
+  verify: 'verify',
+  validate: 'verify',
 };
 
 export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinition> = {
@@ -230,6 +241,37 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       { toolKind: 'explore', purpose: 'Retrieve graph-selected architecture context.', required: true },
     ],
     producesAgentTask: false,
+  },
+  develop: {
+    kind: 'develop',
+    slashCommand: '/develop',
+    label: 'Develop Feature',
+    contextMode: 'balanced',
+    intentParsingStrategy:
+      'Use for feature implementation requests, tickets, and behavior changes that need an end-to-end developer workflow.',
+    mcpToolsRequired: ['status', 'explore', 'impact', 'files'],
+    graphQueryPlan: [
+      'codegraph_status: confirm index readiness.',
+      'codegraph_explore: find the current behavior, extension points, and nearby tests.',
+      'codegraph_impact: check blast radius when a concrete symbol is known.',
+      'codegraph_files: locate implementation and test boundaries only when explore is insufficient.',
+    ],
+    contextOptimizationStrategy:
+      'Balanced mode: retain acceptance criteria, the current flow, likely edit points, affected callers, and focused tests.',
+    promptConstructionStrategy:
+      'Return the shortest safe path from requirement to an Agent-ready implementation task and verification checklist.',
+    outputSchema: ['findings', 'impactRisk', 'plan', 'copilotAgentTask', 'validationSteps'],
+    exampleConversation: [
+      'User: @CodeBrain /develop add session timeout from ABC-123',
+      'CodeBrain: grounds the current flow, checks impact, then returns a compact implementation and verification task.',
+    ],
+    toolPlan: [
+      { toolKind: 'status', purpose: 'Confirm CodeGraph is ready before planning.', required: true },
+      { toolKind: 'explore', purpose: 'Retrieve current behavior and likely edit points.', required: true },
+      { toolKind: 'impact', purpose: 'Check affected callers when a symbol is known.', required: false },
+      { toolKind: 'files', purpose: 'Locate tests when graph evidence is broad.', required: false },
+    ],
+    producesAgentTask: true,
   },
   explain: {
     kind: 'explain',
@@ -479,6 +521,69 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     ],
     producesAgentTask: true,
   },
+  fix: {
+    kind: 'fix',
+    slashCommand: '/fix',
+    label: 'Fix Bug',
+    contextMode: 'balanced',
+    intentParsingStrategy:
+      'Use for failures, regressions, exceptions, and incorrect behavior that require evidence before a minimal fix.',
+    mcpToolsRequired: ['status', 'explore', 'search', 'callers', 'callees', 'impact'],
+    graphQueryPlan: [
+      'codegraph_status: check freshness before diagnosis.',
+      'codegraph_explore: trace the failing behavior and nearby tests.',
+      'codegraph_search/callers/callees: resolve and trace a concrete symbol when available.',
+      'codegraph_impact: bound the regression risk of the minimal fix.',
+    ],
+    contextOptimizationStrategy:
+      'Balanced mode: keep symptom, expected/actual behavior, root-cause evidence, the minimal fix boundary, and one regression path.',
+    promptConstructionStrategy:
+      'Do not assert a root cause without evidence; produce a diagnostic plan when reproduction or evidence is missing.',
+    outputSchema: ['findings', 'impactRisk', 'plan', 'copilotAgentTask', 'validationSteps'],
+    exampleConversation: [
+      'User: @CodeBrain /fix login returns 500 after token expiry',
+      'CodeBrain: traces the failure, ranks evidence-backed causes, and returns a minimal fix plus regression task.',
+    ],
+    toolPlan: [
+      { toolKind: 'status', purpose: 'Check index freshness before diagnosis.', required: true },
+      { toolKind: 'explore', purpose: 'Trace failing behavior and existing tests.', required: true },
+      { toolKind: 'callers', purpose: 'Find upstream reproduction paths for a symbol.', required: false },
+      { toolKind: 'callees', purpose: 'Find downstream failure boundaries for a symbol.', required: false },
+      { toolKind: 'impact', purpose: 'Bound regression risk before fixing.', required: false },
+    ],
+    producesAgentTask: true,
+  },
+  verify: {
+    kind: 'verify',
+    slashCommand: '/verify',
+    label: 'Verify Change',
+    contextMode: 'compact',
+    intentParsingStrategy:
+      'Use for validating a working-tree diff, symbol, file, or completed implementation with the smallest relevant test scope.',
+    mcpToolsRequired: ['status', 'explore', 'impact', 'files'],
+    graphQueryPlan: [
+      'codegraph_status: check index and change freshness.',
+      'codegraph_explore: find affected behavior and existing tests.',
+      'codegraph_impact: identify regression paths when a symbol is known.',
+      'codegraph_files: locate exact test files only when needed.',
+    ],
+    contextOptimizationStrategy:
+      'Compact mode: changed scope, affected tests, exact validation commands, and residual risk only.',
+    promptConstructionStrategy:
+      'Separate tests that should run from tests actually confirmed as run; never report a plan as a passing test result.',
+    outputSchema: ['changedScope', 'testTargets', 'recommendedTestCases', 'validationSteps'],
+    exampleConversation: [
+      'User: @CodeBrain /verify working tree diff',
+      'CodeBrain: maps the diff to affected tests and returns a short, ordered validation path.',
+    ],
+    toolPlan: [
+      { toolKind: 'status', purpose: 'Check index and working-tree freshness.', required: true },
+      { toolKind: 'explore', purpose: 'Find affected behavior and nearby tests.', required: true },
+      { toolKind: 'impact', purpose: 'Find regression paths for a known symbol.', required: false },
+      { toolKind: 'files', purpose: 'Locate exact test files if explore is incomplete.', required: false },
+    ],
+    producesAgentTask: false,
+  },
 };
 
 const LOW_CONFIDENCE_THRESHOLD = 0.55;
@@ -561,10 +666,6 @@ export function detectLanguage(prompt: string): 'vi' | 'ko' | 'en' {
   return 'en';
 }
 
-function isContextReportEnabled(): boolean {
-  return vscode.workspace.getConfiguration().get<boolean>('codebrain.showContextReport', false);
-}
-
 function getResponseSchemaKeys(schema: LocalizedHeaderKey[]): LocalizedHeaderKey[] {
   return schema.filter(key => !CONTEXT_REPORT_KEYS.has(key));
 }
@@ -593,6 +694,13 @@ function getWorkflowSpecificOutputRequirements(
         `- In "${headers.architectureFindings}", summarize major modules, responsibilities, boundaries, and important dependencies.`,
         `- In "${headers.flowDiagram}", include one Mermaid fenced code block that shows the main architecture or runtime interaction flow.`,
       ];
+    case 'develop':
+      return [
+        `- In "${headers.findings}", summarize the current behavior and missing acceptance criteria in at most five bullets.`,
+        `- In "${headers.plan}", give the smallest ordered implementation path with likely files or symbols.`,
+        `- In "${headers.copilotAgentTask}", provide one concise task that an implementation agent can execute.`,
+        `- In "${headers.validationSteps}", list focused checks before broader suites.`,
+      ];
     case 'explain':
       return [
         `- In "${headers.mainFlow}", explain the execution path step by step, starting from the entry point and continuing through important branches, side effects, and return behavior.`,
@@ -602,6 +710,12 @@ function getWorkflowSpecificOutputRequirements(
     case 'impact':
       return [
         `- Focus on what is affected, why it is affected, and what should be checked next in "${headers.recommendedNextActions}".`,
+      ];
+    case 'fix':
+      return [
+        `- In "${headers.findings}", separate symptom, expected/actual behavior, evidence, and root-cause confidence.`,
+        `- If evidence is insufficient, provide a diagnostic plan instead of claiming a root cause.`,
+        `- Keep "${headers.plan}" to the minimal safe fix and add one regression test path.`,
       ];
     case 'review':
       return [
@@ -614,6 +728,12 @@ function getWorkflowSpecificOutputRequirements(
     case 'test':
       return [
         `- Focus on what to test, the exact scenarios to cover, and a concrete agent-executable task in "${headers.copilotAgentTask}".`,
+      ];
+    case 'verify':
+      return [
+        `- In "${headers.changedScope}", state the exact diff, symbol, or file being verified.`,
+        `- Distinguish recommended checks from checks confirmed as executed; never label an unrun test as passed.`,
+        `- Order "${headers.validationSteps}" from narrow and fast to broad and expensive.`,
       ];
     case 'detect_change':
       return [
@@ -630,7 +750,6 @@ function getWorkflowSpecificOutputRequirements(
 
 export function buildWorkflowInstructions(intent: WorkflowIntent): string {
   const lang = detectLanguage(intent.rawPrompt);
-  const definition = WORKFLOW_DEFINITIONS[intent.workflow];
   const headers = LOCALIZED_HEADERS[lang];
   const localizedSchema = getWorkflowResponseSections(intent.workflow, lang);
   const orderedWorkflowSections = localizedSchema.join(' -> ');
@@ -642,46 +761,11 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
     ko: 'Mandatory: 전체 응답을 한국어로 작성해야 합니다. 모든 헤더와 섹션 제목에 한국어를 사용하십시오.'
   };
 
-  const intentJson = JSON.stringify(
-    {
-      workflow: intent.workflow,
-      target: intent.target ?? null,
-      targetType: intent.targetType,
-      contextMode: intent.contextMode,
-      confidence: intent.confidence,
-      source: intent.source,
-    },
-    null,
-    2,
-  );
-
   const promptParts = [
-    'CodeBrain v2.0 workflow contract:',
-    'You are CodeBrain, a repository-aware AI workflow orchestration and context optimization layer.',
-    'Positioning: CodeGraph is the repository intelligence engine. GitHub Copilot is the reasoning and agent execution engine. CodeBrain orchestrates workflow resolution, graph retrieval, context optimization, and agent task generation.',
-    'Do not behave like a generic chatbot. Resolve intent into the workflow below, retrieve graph evidence first, then reason.',
-    'Do not directly edit files from this chat participant. For implementation work, generate a structured Copilot Agent Task.',
-    '',
+    'You are CodeBrain. Answer from the supplied CodeGraph evidence, not from guesses.',
+    'Do not edit files here. For implementation work, return one Agent-ready task.',
     languageInstructions[lang],
-    '',
-    `Resolved intent:\n${intentJson}`,
-    '',
-    `Workflow: ${definition.label} (${definition.slashCommand})`,
-    `Context mode: ${intent.contextMode}`,
-    '',
-    'Graph query plan:',
-    ...definition.graphQueryPlan.map((step) => `- ${step}`),
-    '',
-    `Context optimization strategy: ${definition.contextOptimizationStrategy}`,
-    `Prompt construction strategy: ${definition.promptConstructionStrategy}`,
-    ...(definition.supplementalContextPlan?.length
-      ? [
-          '',
-          'Supplemental MCP context plan:',
-          ...definition.supplementalContextPlan.map((step) => `- ${step}`),
-        ]
-      : []),
-    '',
+    `Workflow: ${intent.workflow}; target: ${intent.target ?? 'current context'}; target type: ${intent.targetType}.`,
   ];
 
   if (intent.workflow === 'diagram') {
@@ -696,21 +780,13 @@ export function buildWorkflowInstructions(intent: WorkflowIntent): string {
     ];
 
     mandatoryRequirements.push(
-      '- Use CodeGraph tool results as evidence. Do not blindly answer from prompt text.',
-      '- Return only the sections relevant to this slash workflow. Do not include context-report/meta sections unless the user explicitly asks for them.',
+      '- Use only supplied evidence and clearly mark missing evidence.',
+      '- Return only workflow sections; omit context-report/meta prose.',
       `- Keep the answer workflow-shaped and use this section order: ${orderedWorkflowSections}.`,
       ...workflowSpecificRequirements
     );
 
     promptParts.push(...mandatoryRequirements);
-  }
-
-  if (intent.workflow !== 'diagram') {
-    promptParts.push(
-      '',
-      'Expected output schema:',
-      ...localizedSchema.map((section) => `- ${section}`)
-    );
   }
 
   return promptParts.join('\n');
@@ -766,17 +842,22 @@ function resolveHeuristicWorkflow(prompt: string, editorContext: EditorIntentCon
   const lower = prompt.toLowerCase();
   const symbol = extractSymbol(prompt);
 
-  if (/\b(architecture|module map|system overview|onboard|onboarding)\b/u.test(lower)) {
+  if (/\b(architecture|module map|system overview|onboard|onboarding)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'architecture')) {
     const target = resolveTarget(prompt, 'architecture', editorContext);
     return baseIntent('architecture', target.value, target.type, 0.78, 'heuristic', prompt);
   }
 
-  if (/\b(review|pr|diff|changed files|working tree)\b/u.test(lower)) {
+  if (/\b(verify|validate|validation|run checks?|check the changes?|ready to merge)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'verify')) {
+    const target = resolveTarget(prompt, 'verify', editorContext);
+    return baseIntent('verify', target.value, target.type, 0.76, 'heuristic', prompt);
+  }
+
+  if (/\b(review|pr review|review changes|changed files)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'review')) {
     const target = resolveTarget(prompt, 'review', editorContext);
     return baseIntent('review', target.value, target.type, 0.78, 'git-diff', prompt);
   }
 
-  if (/\b(detect change|detect changes|change impact|pending changes)\b/u.test(lower)) {
+  if (/\b(detect change|detect changes|change impact|pending changes)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'detect_change')) {
     const target = resolveTarget(prompt, 'detect_change', editorContext);
     return baseIntent('detect_change', target.value, target.type, 0.78, 'git-diff', prompt);
   }
@@ -786,22 +867,32 @@ function resolveHeuristicWorkflow(prompt: string, editorContext: EditorIntentCon
     return baseIntent('diagram', target.value, target.type, target.value ? 0.76 : 0.5, 'heuristic', prompt);
   }
 
-  if (/\b(impact|blast radius|callers|callees|dependents?)\b/u.test(lower)) {
+  if (/\b(impact|blast radius|callers|callees|dependents?)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'impact')) {
     const target = symbol ?? editorContext.selectedSymbol ?? editorContext.cursorSymbol;
     return baseIntent('impact', target, target ? 'symbol' : 'unknown', target ? 0.74 : 0.45, target ? 'regex-symbol' : 'low-confidence', prompt);
   }
 
-  if (/\b(test plan|tests?|coverage|regression)\b/u.test(lower)) {
+  if (/\b(fix|bugfix|bug|failure|failing|exception|crash|regression|incorrect|broken)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'fix')) {
+    const target = resolveTarget(prompt, 'fix', editorContext);
+    return baseIntent('fix', target.value, target.type, target.value ? 0.74 : 0.58, 'heuristic', prompt);
+  }
+
+  if (/\b(develop|feature|implement|implementation|add support|build)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'develop')) {
+    const target = resolveTarget(prompt, 'develop', editorContext);
+    return baseIntent('develop', target.value, target.type, target.value ? 0.74 : 0.58, 'heuristic', prompt);
+  }
+
+  if (/\b(test plan|tests?|coverage)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'test')) {
     const target = resolveTarget(prompt, 'test', editorContext);
     return baseIntent('test', target.value, target.type, target.value ? 0.72 : 0.5, 'heuristic', prompt);
   }
 
-  if (/\b(plan|fix plan|implementation plan|implement|debug|bug|refactor|rename|extract|jira|confluence|collab)\b/u.test(lower)) {
+  if (/\b(plan|fix plan|implementation plan|debug|refactor|rename|extract|jira|confluence|collab)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'plan')) {
     const target = resolveTarget(prompt, 'plan', editorContext);
     return baseIntent('plan', target.value, target.type, target.value ? 0.7 : 0.5, 'heuristic', prompt);
   }
 
-  if (/\b(explain|understand|how does|flow|what does)\b/u.test(lower)) {
+  if (/\b(explain|understand|how does|flow|what does)\b/u.test(lower) || matchesLocalizedWorkflow(lower, 'explain')) {
     const target = resolveTarget(prompt, 'explain', editorContext);
     return baseIntent('explain', target.value, target.type, target.value ? 0.74 : 0.5, 'heuristic', prompt);
   }
@@ -849,12 +940,26 @@ function resolveTarget(
     return { value: trimmed || 'working tree diff', type: 'diff' };
   }
 
+  if (workflow === 'verify' && (!trimmed || /^working tree diff$/iu.test(trimmed))) {
+    if (editorContext.selectedSymbol) {
+      return { value: editorContext.selectedSymbol, type: 'symbol' };
+    }
+    if (editorContext.cursorSymbol) {
+      return { value: editorContext.cursorSymbol, type: 'symbol' };
+    }
+    if (editorContext.relativeFilePath) {
+      return { value: editorContext.relativeFilePath, type: 'file' };
+    }
+    return { value: 'working tree diff', type: 'diff' };
+  }
+
   if (trimmed && !looksLikeSelectedSymbolAlias(trimmed)) {
     const symbol = extractSymbol(trimmed);
-    if (symbol && (workflow === 'impact' || workflow === 'explain')) {
+    const supportsSymbolTarget = workflow === 'impact' || workflow === 'explain' || workflow === 'develop' || workflow === 'fix' || workflow === 'verify';
+    if (symbol && supportsSymbolTarget) {
       return { value: symbol, type: 'symbol' };
     }
-    if ((workflow === 'impact' || workflow === 'explain') && SIMPLE_SYMBOL_PATTERN.test(trimmed)) {
+    if (supportsSymbolTarget && SIMPLE_SYMBOL_PATTERN.test(trimmed)) {
       return { value: trimmed, type: 'symbol' };
     }
     return { value: trimmed, type: workflow === 'impact' ? 'symbol' : 'task' };

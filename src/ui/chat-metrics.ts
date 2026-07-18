@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import { getOutputChannel } from '../process/cli-runner.js';
 
 export interface ChatMetrics {
@@ -21,7 +20,7 @@ export class ChatMetricsCollector {
       ...metric,
       timestamp: Date.now(),
     });
-    
+
     // Log every 10 metrics or when specifically requested
     if (this.metrics.length % 5 === 0) {
       this.logSummary();
@@ -34,15 +33,21 @@ export class ChatMetricsCollector {
     const total = this.metrics.reduce((acc, m) => ({
       tokensSaved: acc.tokensSaved + m.tokensSaved,
       tokensUsed: acc.tokensUsed + m.tokensUsed,
+      responseTimeMs: acc.responseTimeMs + m.responseTimeMs,
       cacheHits: acc.cacheHits + m.cacheHits,
+      cacheMisses: acc.cacheMisses + m.cacheMisses,
       toolCallsCount: acc.toolCallsCount + m.toolCallsCount,
-    }), { tokensSaved: 0, tokensUsed: 0, cacheHits: 0, toolCallsCount: 0 });
+    }), { tokensSaved: 0, tokensUsed: 0, responseTimeMs: 0, cacheHits: 0, cacheMisses: 0, toolCallsCount: 0 });
+
+    const cacheLookups = total.cacheHits + total.cacheMisses;
 
     return {
       count: this.metrics.length,
       averageTokensSaved: total.tokensSaved / this.metrics.length,
+      averageTokensUsed: total.tokensUsed / this.metrics.length,
       totalTokensSaved: total.tokensSaved,
-      cacheHitRate: total.cacheHits / (total.cacheHits + (this.metrics.length - total.cacheHits)),
+      averageResponseTimeMs: total.responseTimeMs / this.metrics.length,
+      cacheHitRate: cacheLookups > 0 ? total.cacheHits / cacheLookups : 0,
       averageToolCalls: total.toolCallsCount / this.metrics.length,
     };
   }
@@ -60,6 +65,8 @@ export class ChatMetricsCollector {
     channel.appendLine(`Sessions tracked: ${summary.count}`);
     channel.appendLine(`Total tokens saved: ${summary.totalTokensSaved.toLocaleString()}`);
     channel.appendLine(`Average tokens saved/msg: ${summary.averageTokensSaved.toFixed(0)}`);
+    channel.appendLine(`Average input tokens/msg: ${summary.averageTokensUsed.toFixed(0)}`);
+    channel.appendLine(`Average response time: ${summary.averageResponseTimeMs.toFixed(0)} ms`);
     channel.appendLine(`Cache hit rate: ${(summary.cacheHitRate * 100).toFixed(1)}%`);
     channel.appendLine(`Average tool calls: ${summary.averageToolCalls.toFixed(1)}`);
     channel.appendLine('------------------------------------------');

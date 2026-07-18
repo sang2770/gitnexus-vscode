@@ -40,6 +40,21 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
 
     const actions: Array<{ label: string; description: string; command: string }> = [
       {
+        label: 'Develop Feature',
+        description: 'Short CodeGraph workflow from requirement to implementation and verification',
+        command: 'codebrain.workflow.develop',
+      },
+      {
+        label: 'Fix Bug',
+        description: 'Trace evidence, bound impact, and prepare a minimal regression-safe fix',
+        command: 'codebrain.workflow.fix',
+      },
+      {
+        label: 'Verify Change',
+        description: 'Find and order the smallest affected validation scope',
+        command: 'codebrain.workflow.verify',
+      },
+      {
         label: 'Explain Current Flow',
         description: 'Compact graph context for the selected symbol or current file',
         command: 'codebrain.workflow.explain',

@@ -8,6 +8,7 @@ const projectRoot = path.resolve(__dirname, '..');
 const sourceRoot = path.join(projectRoot, 'codegraph');
 const runtimeRoot = path.join(projectRoot, 'runtime', 'codegraph');
 const sourceDist = path.join(sourceRoot, 'dist');
+const SECURITY_PINNED_RUNTIME_PACKAGES = ['picomatch@4.0.5'];
 
 const SUPPORTED_TARGETS = new Set([
   'darwin-arm64',
@@ -95,6 +96,15 @@ function main() {
   console.log('  Installing production dependencies...');
   const npm = npmInvocation(['ci', '--omit=dev', '--ignore-scripts']);
   run(npm.command, npm.args, { cwd: path.join(runtimeRoot, 'lib') });
+  const securityUpdate = npmInvocation([
+    'install',
+    '--omit=dev',
+    '--ignore-scripts',
+    '--no-save',
+    '--package-lock=false',
+    ...SECURITY_PINNED_RUNTIME_PACKAGES,
+  ]);
+  run(securityUpdate.command, securityUpdate.args, { cwd: path.join(runtimeRoot, 'lib') });
   fs.rmSync(path.join(runtimeRoot, 'lib', 'package-lock.json'), { force: true });
 
   writeLauncher();
