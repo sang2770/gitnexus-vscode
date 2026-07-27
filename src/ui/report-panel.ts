@@ -12,30 +12,7 @@ import {
 const GraphologyRuntime = require('graphology') as any;
 const forceAtlas2 = require('graphology-layout-forceatlas2') as any;
 
-export interface StatusReportData {
-  initialized?: boolean;
-  version?: string;
-  projectPath?: string;
-  indexPath?: string;
-  lastIndexed?: string | null;
-  fileCount?: number;
-  nodeCount?: number;
-  edgeCount?: number;
-  dbSizeBytes?: number;
-  backend?: string;
-  journalMode?: string;
-  languages?: string[];
-  nodesByKind?: Record<string, number>;
-  pendingChanges?: {
-    added?: number;
-    modified?: number;
-    removed?: number;
-  };
-  worktreeMismatch?: {
-    worktreeRoot?: string;
-    indexRoot?: string;
-  } | null;
-}
+
 
 export interface QueryResultNode {
   name?: string;
@@ -128,20 +105,6 @@ export function configureReportPanel(extensionUri: vscode.Uri): void {
   }
 }
 
-export function showStatusReport(status: StatusReportData, rawOutput: string): void {
-  const report = createTokenReductionReport({
-    beforeText: rawOutput,
-    afterText: buildStatusOptimizedText(status),
-    defaultMode: 'compact',
-    source: 'status-report',
-    filesScanned: status.fileCount,
-    selectedFiles: [],
-  });
-  showReportPanel({
-    title: 'Index Status',
-    html: buildStatusHtml(status, rawOutput, report),
-  });
-}
 
 export function showQueryReport(
   query: string,
@@ -253,62 +216,7 @@ function resolveReportPath(filePath: string): string | undefined {
   return candidates.find((candidate) => fs.existsSync(candidate));
 }
 
-function buildStatusHtml(status: StatusReportData, rawOutput: string, report: TokenReductionReport): string {
-  const pending = status.pendingChanges;
-  const pendingTotal = (pending?.added ?? 0) + (pending?.modified ?? 0) + (pending?.removed ?? 0);
-  const state = !status.initialized ? 'Not Indexed' : pendingTotal > 0 ? 'Stale' : 'Fresh';
-  const stateClass = !status.initialized ? 'danger' : pendingTotal > 0 ? 'warning' : 'success';
 
-  const cards = [
-    metricCard('State', state, stateClass),
-    metricCard('Files', formatNumber(status.fileCount)),
-    metricCard('Nodes', formatNumber(status.nodeCount)),
-    metricCard('Edges', formatNumber(status.edgeCount)),
-    metricCard('Pending', formatNumber(pendingTotal), pendingTotal > 0 ? 'warning' : undefined),
-    metricCard('DB Size', formatBytes(status.dbSizeBytes)),
-  ].join('');
-
-  const projectRows = [
-    detailRow('Project', status.projectPath),
-    detailRow('Index path', status.indexPath),
-    detailRow('Version', status.version),
-    detailRow('Last indexed', status.lastIndexed ?? undefined),
-    detailRow('Backend', status.backend),
-    detailRow('Journal', status.journalMode),
-  ].join('');
-
-  const pendingRows = [
-    detailRow('Added', formatNumber(pending?.added)),
-    detailRow('Modified', formatNumber(pending?.modified)),
-    detailRow('Removed', formatNumber(pending?.removed)),
-  ].join('');
-
-  const languages = (status.languages ?? []).map((language) => tag(language)).join('');
-  const nodeKinds = Object.entries(status.nodesByKind ?? {})
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 24)
-    .map(([kind, count]) => detailRow(kind, formatNumber(count)))
-    .join('');
-
-  const mismatch = status.worktreeMismatch
-    ? section('Worktree Warning', [
-        detailRow('Worktree root', status.worktreeMismatch.worktreeRoot),
-        detailRow('Index root', status.worktreeMismatch.indexRoot),
-      ].join(''), 'warning-section')
-    : '';
-
-  return [
-    `<div class="hero"><div><div class="eyebrow">CodeGraph</div><h1>Index Status</h1></div><span class="pill ${stateClass}">${escapeHtml(state)}</span></div>`,
-    `<div class="cards">${cards}</div>`,
-    section('Project', `<div class="details">${projectRows}</div>`),
-    section('Pending Changes', `<div class="details">${pendingRows}</div>`),
-    languages ? section('Languages', `<div class="tags">${languages}</div>`) : '',
-    nodeKinds ? section('Symbols by Kind', `<div class="details compact">${nodeKinds}</div>`) : '',
-    mismatch,
-    buildTokenOptimizationSection(report),
-    section('Raw JSON', `<pre>${escapeHtml(rawOutput.trim() || JSON.stringify(status, null, 2))}</pre>`),
-  ].join('');
-}
 
 function buildQueryHtml(
   query: string,
@@ -334,18 +242,7 @@ function buildContextAnalysisHtml(title: string, report: ContextAnalysisReport):
   ].join('');
 }
 
-function buildStatusOptimizedText(status: StatusReportData): string {
-  const pending = status.pendingChanges;
-  return [
-    `initialized=${status.initialized ? 'true' : 'false'}`,
-    `project=${status.projectPath ?? '-'}`,
-    `lastIndexed=${status.lastIndexed ?? '-'}`,
-    `files=${status.fileCount ?? '-'}`,
-    `nodes=${status.nodeCount ?? '-'}`,
-    `edges=${status.edgeCount ?? '-'}`,
-    `pending=${(pending?.added ?? 0) + (pending?.modified ?? 0) + (pending?.removed ?? 0)}`,
-  ].join('\n');
-}
+
 
 function buildQueryGraphSection(graph: QueryGraphData): string {
   const warning = graph.warnings.length > 0

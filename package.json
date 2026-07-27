@@ -146,36 +146,7 @@
         "category": "CodeBrain",
         "icon": "$(symbol-structure)"
       },
-      {
-        "command": "codebrain.impactLens.impact",
-        "title": "Impact Lens: Analyze Impact",
-        "category": "CodeBrain",
-        "icon": "$(graph-line)"
-      },
-      {
-        "command": "codebrain.impactLens.callers",
-        "title": "Impact Lens: Find Callers",
-        "category": "CodeBrain",
-        "icon": "$(call-incoming)"
-      },
-      {
-        "command": "codebrain.impactLens.callees",
-        "title": "Impact Lens: Find Callees",
-        "category": "CodeBrain",
-        "icon": "$(call-outgoing)"
-      },
-      {
-        "command": "codebrain.impactLens.affectedTests",
-        "title": "Impact Lens: Find Affected Tests",
-        "category": "CodeBrain",
-        "icon": "$(beaker)"
-      },
-      {
-        "command": "codebrain.impactLens.askCodeBrain",
-        "title": "Impact Lens: Ask CodeBrain About Target",
-        "category": "CodeBrain",
-        "icon": "$(comment-discussion)"
-      },
+
       {
         "command": "codebrain.clean",
         "title": "Clean CodeGraph Index",
@@ -282,11 +253,7 @@
           "name": "Quick Actions",
           "icon": "$(zap)"
         },
-        {
-          "id": "codebrain.impactLens",
-          "name": "Impact Lens",
-          "icon": "$(target)"
-        },
+
         {
           "id": "codebrain.agents",
           "name": "Copilot Agents",
@@ -298,7 +265,7 @@
       "view/title": [
         {
           "command": "codebrain.refreshTreeView",
-          "when": "view == codebrain.quickActions || view == codebrain.impactLens || view == codebrain.agents",
+          "when": "view == codebrain.quickActions || view == codebrain.agents",
           "group": "navigation"
         }
       ],
@@ -338,11 +305,7 @@
           "group": "codebrain@5",
           "when": "editorTextFocus"
         },
-        {
-          "command": "codebrain.impactLens.impact",
-          "group": "codebrain@6",
-          "when": "editorTextFocus"
-        },
+
         {
           "command": "codebrain.prReview",
           "group": "codebrain@7",

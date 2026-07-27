@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { ensureCodeBrainCli } from '../process/prerequisites.js';
 import { getOutputChannel, getWorkspaceRoot, runCodeBrain } from '../process/cli-runner.js';
-import { showStatusReport } from '../ui/report-panel.js';
 
 interface CodeGraphStatusJson {
   initialized?: boolean;
@@ -82,7 +81,6 @@ export async function statusCommand(): Promise<void> {
         const parsed = JSON.parse(result.stdout) as CodeGraphStatusJson;
         const status = deriveStatus(parsed);
         channel.appendLine(result.stdout.trim());
-        showStatusReport(parsed, result.stdout);
         vscode.window.showInformationMessage(formatStatusMessage(status, parsed));
       } catch {
         channel.appendLine(result.stdout.trim());

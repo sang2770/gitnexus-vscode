@@ -20,12 +20,7 @@ import { checkForExtensionUpdatesCommand } from './process/update-checker.js';
 import { StalenessMonitor } from './staleness/staleness-monitor.js';
 import { createCodeGraphParticipant } from './ui/chat-participant.js';
 import { configureReportPanel } from './ui/report-panel.js';
-import {
-  askCodeBrainAboutImpactTarget,
-  ImpactLensTreeProvider,
-  openImpactLensLocation,
-  runImpactLensAnalysis,
-} from './ui/impact-lens.js';
+
 import { CodeBrainStatusBar } from './ui/status-bar.js';
 import { AgentsTreeProvider, QuickActionsTreeProvider } from './ui/tree-view.js';
 
@@ -47,13 +42,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const quickActionsProvider = new QuickActionsTreeProvider();
   const agentsProvider = new AgentsTreeProvider();
-  const impactLensProvider = new ImpactLensTreeProvider();
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('codebrain.quickActions', quickActionsProvider),
     vscode.window.registerTreeDataProvider('codebrain.agents', agentsProvider),
-    vscode.window.registerTreeDataProvider('codebrain.impactLens', impactLensProvider),
-    vscode.window.onDidChangeActiveTextEditor(() => impactLensProvider.refreshContext()),
-    vscode.window.onDidChangeTextEditorSelection(() => impactLensProvider.refreshContext()),
   );
 
   const runAnalyzeWithStatus = async (opts: AnalyzeOptions = {}): Promise<boolean> => {
@@ -126,19 +117,12 @@ export function activate(context: vscode.ExtensionContext): void {
       () => {
         quickActionsProvider.refresh();
         agentsProvider.refresh();
-        impactLensProvider.refreshContext();
         statusBar.refreshContext();
         if (staleness) {
           void staleness.forceCheck();
         }
       },
     ],
-    ['codebrain.impactLens.impact', () => runImpactLensAnalysis(impactLensProvider, 'impact')],
-    ['codebrain.impactLens.callers', () => runImpactLensAnalysis(impactLensProvider, 'callers')],
-    ['codebrain.impactLens.callees', () => runImpactLensAnalysis(impactLensProvider, 'callees')],
-    ['codebrain.impactLens.affectedTests', () => runImpactLensAnalysis(impactLensProvider, 'affected')],
-    ['codebrain.impactLens.openLocation', (location) => openImpactLensLocation(location)],
-    ['codebrain.impactLens.askCodeBrain', () => askCodeBrainAboutImpactTarget(impactLensProvider)],
   ];
 
   for (const [id, handler] of commands) {

@@ -216,11 +216,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'full',
     intentParsingStrategy:
       'Slash command first, then architecture/onboarding keywords, then repository context.',
-    mcpToolsRequired: ['status', 'files', 'explore'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
-      'codegraph_status: verify index freshness and repository size.',
-      'codegraph_files: inspect module layout with metadata.',
-      'codegraph_explore: retrieve architecture-relevant entry points and dependency clusters.',
+      'codegraph_explore: retrieve architecture-relevant entry points, module layout, and dependency clusters.',
     ],
     contextOptimizationStrategy:
       'Full mode: include representative entry points, module relationships, and broader dependency clusters without dumping whole files.',
@@ -233,11 +231,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     ],
     exampleConversation: [
       'User: @CodeBrain /architecture auth module',
-      'CodeBrain: resolves architecture workflow, checks index, scans module files, explores auth entry points, then summarizes architecture.',
+      'CodeBrain: resolves architecture workflow, scans module files, explores auth entry points, then summarizes architecture.',
     ],
     toolPlan: [
-      { toolKind: 'status', purpose: 'Check index freshness before architecture analysis.', required: true },
-      { toolKind: 'files', purpose: 'Map repository/module layout before selecting context.', required: true },
       { toolKind: 'explore', purpose: 'Retrieve graph-selected architecture context.', required: true },
     ],
     producesAgentTask: false,
@@ -249,12 +245,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Use for feature implementation requests, tickets, and behavior changes that need an end-to-end developer workflow.',
-    mcpToolsRequired: ['status', 'explore', 'impact', 'files'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
-      'codegraph_status: confirm index readiness.',
       'codegraph_explore: find the current behavior, extension points, and nearby tests.',
-      'codegraph_impact: check blast radius when a concrete symbol is known.',
-      'codegraph_files: locate implementation and test boundaries only when explore is insufficient.',
     ],
     contextOptimizationStrategy:
       'Balanced mode: retain acceptance criteria, the current flow, likely edit points, affected callers, and focused tests.',
@@ -266,10 +259,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'CodeBrain: grounds the current flow, checks impact, then returns a compact implementation and verification task.',
     ],
     toolPlan: [
-      { toolKind: 'status', purpose: 'Confirm CodeGraph is ready before planning.', required: true },
       { toolKind: 'explore', purpose: 'Retrieve current behavior and likely edit points.', required: true },
-      { toolKind: 'impact', purpose: 'Check affected callers when a symbol is known.', required: false },
-      { toolKind: 'files', purpose: 'Locate tests when graph evidence is broad.', required: false },
     ],
     producesAgentTask: true,
   },
@@ -280,12 +270,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Slash command or selected symbol first; otherwise use current editor context and symbol extraction.',
-    mcpToolsRequired: ['explore', 'callers', 'callees', 'node'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
       'codegraph_explore: retrieve the core flow in one capped graph-aware call.',
-      'codegraph_callers: inspect direct entry points when a symbol target is available.',
-      'codegraph_callees: inspect direct downstream calls when a symbol target is available.',
-      'codegraph_node: fetch exact symbol body only if explore trimmed necessary details.',
     ],
     contextOptimizationStrategy:
       'Balanced mode: target source, direct callers, direct callees, and the smallest set of surrounding flow evidence needed for a faithful explanation.',
@@ -302,9 +289,6 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     ],
     toolPlan: [
       { toolKind: 'explore', purpose: 'Retrieve compact source context for the target flow.', required: true },
-      { toolKind: 'callers', purpose: 'Confirm direct entry points for the explained symbol.', required: true },
-      { toolKind: 'callees', purpose: 'Confirm direct dependencies for the explained symbol.', required: true },
-      { toolKind: 'node', purpose: 'Fetch exact symbol body only if explore trimmed necessary details.', required: false },
     ],
     producesAgentTask: false,
   },
@@ -315,12 +299,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Slash command or selected symbol required; fall back to regex symbol extraction only with clear confidence.',
-    mcpToolsRequired: ['search', 'callers', 'callees', 'impact'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
-      'codegraph_search: resolve the target symbol deterministically.',
-      'codegraph_callers: identify direct dependents.',
-      'codegraph_callees: identify downstream dependencies.',
-      'codegraph_impact: traverse blast radius and d-level risk.',
+      'codegraph_explore: traverse blast radius and retrieve caller/callee context for the target symbol.',
     ],
     contextOptimizationStrategy:
       'Balanced mode: target symbol, callers, callees, direct dependencies, and related tests when visible.',
@@ -336,10 +317,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'CodeBrain: resolves AuthService.login, runs callers/callees/impact, and reports d-level risk.',
     ],
     toolPlan: [
-      { toolKind: 'search', purpose: 'Resolve the target symbol before impact traversal.', required: true },
-      { toolKind: 'callers', purpose: 'Find direct upstream dependents.', required: true },
-      { toolKind: 'callees', purpose: 'Find direct downstream dependencies.', required: true },
-      { toolKind: 'impact', purpose: 'Compute graph blast radius.', required: true },
+      { toolKind: 'explore', purpose: 'Retrieve caller/callee relationships and blast radius context.', required: true },
     ],
     producesAgentTask: false,
   },
@@ -350,11 +328,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Slash command, SCM command, or git-diff keywords; changed files are treated as diff context.',
-    mcpToolsRequired: ['status', 'explore', 'impact'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
-      'codegraph_status: verify index freshness against the diff.',
-      'codegraph_explore: retrieve changed-area context and related flows.',
-      'codegraph_impact: inspect non-trivial changed symbols for downstream risk.',
+      'codegraph_explore: retrieve changed-area context, related flows, and blast radius.',
     ],
     contextOptimizationStrategy:
       'Balanced mode: changed files, changed symbols, affected dependencies, and related tests.',
@@ -372,9 +348,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'CodeBrain: checks index freshness, reviews diff context, explores changed flows, and reports findings first.',
     ],
     toolPlan: [
-      { toolKind: 'status', purpose: 'Check stale-index risk before review.', required: true },
       { toolKind: 'explore', purpose: 'Retrieve graph context for changed files and symbols.', required: true },
-      { toolKind: 'impact', purpose: 'Inspect changed symbols with likely downstream effects.', required: false },
     ],
     producesAgentTask: false,
   },
@@ -385,11 +359,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Slash command or test/coverage keywords; selected symbol/file scopes the test target.',
-    mcpToolsRequired: ['explore', 'impact', 'files'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
-      'codegraph_explore: retrieve target behavior and existing test seams.',
-      'codegraph_impact: identify callers/dependents that need regression coverage.',
-      'codegraph_files: locate likely test files when needed.',
+      'codegraph_explore: retrieve target behavior, existing test seams, and callers needing regression coverage.',
     ],
     contextOptimizationStrategy:
       'Balanced mode: target behavior, existing tests, impacted dependents, and validation boundaries.',
@@ -407,8 +379,6 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     ],
     toolPlan: [
       { toolKind: 'explore', purpose: 'Retrieve target behavior and nearby tests.', required: true },
-      { toolKind: 'impact', purpose: 'Find dependents that need regression tests.', required: false },
-      { toolKind: 'files', purpose: 'Locate existing test files when the target is broad.', required: false },
     ],
     producesAgentTask: true,
   },
@@ -419,11 +389,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Slash command, SCM context, or diff/change keywords; target defaults to working tree diff.',
-    mcpToolsRequired: ['status', 'explore', 'impact'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
-      'codegraph_status: determine freshness and pending changes.',
-      'codegraph_explore: map changed files to graph flows.',
-      'codegraph_impact: run symbol impact when changed symbols are clear.',
+      'codegraph_explore: map changed files to graph flows and retrieve blast radius.',
     ],
     contextOptimizationStrategy:
       'Balanced mode: changed files, changed symbols, directly affected dependencies, and tests.',
@@ -440,9 +408,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'CodeBrain: checks pending changes, explores changed flows, and summarizes downstream risk.',
     ],
     toolPlan: [
-      { toolKind: 'status', purpose: 'Read pending change and freshness metadata.', required: true },
       { toolKind: 'explore', purpose: 'Retrieve graph context for changed areas.', required: true },
-      { toolKind: 'impact', purpose: 'Compute blast radius when changed symbols are identifiable.', required: false },
     ],
     producesAgentTask: false,
   },
@@ -453,13 +419,10 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Slash command first, then diagram keywords; selected symbol/file scopes the diagram target.',
-    mcpToolsRequired: ['search', 'callers', 'callees', 'explore'],
+    mcpToolsRequired: ['explore'],
     supplementalMcpToolHints: [],
     graphQueryPlan: [
-      'codegraph_search: resolve target symbol or query scope.',
-      'codegraph_callers: collect upstream nodes for flow edges.',
-      'codegraph_callees: collect downstream nodes for flow edges.',
-      'codegraph_explore: enrich with behavior/context when symbol resolution is broad.',
+      'codegraph_explore: retrieve callers, callees, and essential contextual flow details for diagram generation.',
     ],
     supplementalContextPlan: [
       'Use CodeGraph evidence to generate a Mermaid markdown preview that can be opened directly in VS Code.',
@@ -474,10 +437,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'CodeBrain: resolves target, pulls callers/callees/explore context, then returns a Mermaid fenced code block.',
     ],
     toolPlan: [
-      { toolKind: 'search', purpose: 'Resolve a stable target for diagram generation.', required: true },
-      { toolKind: 'callers', purpose: 'Collect incoming flow edges.', required: true },
-      { toolKind: 'callees', purpose: 'Collect outgoing flow edges.', required: true },
-      { toolKind: 'explore', purpose: 'Add essential contextual flow details.', required: false },
+      { toolKind: 'explore', purpose: 'Retrieve incoming/outgoing flow edges and contextual details.', required: true },
     ],
     producesAgentTask: false,
   },
@@ -488,12 +448,10 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Slash command, selected symbol, Jira/collab references, implementation-plan keywords, or issue/debug/refactor wording.',
-    mcpToolsRequired: ['explore', 'impact', 'node'],
+    mcpToolsRequired: ['explore'],
     supplementalMcpToolHints: ['atlassian', 'jira', 'confluence', 'collab'],
     graphQueryPlan: [
-      'codegraph_explore: retrieve relevant flow and constraints.',
-      'codegraph_impact: inspect blast radius before proposing edits.',
-      'codegraph_node: fetch exact symbol details only if needed for a precise plan.',
+      'codegraph_explore: retrieve relevant flow, constraints, and blast radius before proposing edits.',
     ],
     supplementalContextPlan: [
       'mcp-atlassian (optional): pull Jira issue fields, acceptance criteria, linked tickets, and collaboration/Confluence document context when the request includes an issue key, Jira URL, collab link, or attached Atlassian tools.',
@@ -515,9 +473,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'CodeBrain: explores auth flows, checks impact, pulls available Jira/collab context, then produces a task Copilot Agent can execute.',
     ],
     toolPlan: [
-      { toolKind: 'explore', purpose: 'Retrieve implementation context and constraints.', required: true },
-      { toolKind: 'impact', purpose: 'Check blast radius before planning edits.', required: true },
-      { toolKind: 'node', purpose: 'Fetch exact symbol details if a specific function/class needs changes.', required: false },
+      { toolKind: 'explore', purpose: 'Retrieve implementation context, constraints, and blast radius.', required: true },
     ],
     producesAgentTask: true,
   },
@@ -528,12 +484,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'balanced',
     intentParsingStrategy:
       'Use for failures, regressions, exceptions, and incorrect behavior that require evidence before a minimal fix.',
-    mcpToolsRequired: ['status', 'explore', 'search', 'callers', 'callees', 'impact'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
-      'codegraph_status: check freshness before diagnosis.',
-      'codegraph_explore: trace the failing behavior and nearby tests.',
-      'codegraph_search/callers/callees: resolve and trace a concrete symbol when available.',
-      'codegraph_impact: bound the regression risk of the minimal fix.',
+      'codegraph_explore: trace the failing behavior, nearby tests, and bound regression risk.',
     ],
     contextOptimizationStrategy:
       'Balanced mode: keep symptom, expected/actual behavior, root-cause evidence, the minimal fix boundary, and one regression path.',
@@ -545,11 +498,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'CodeBrain: traces the failure, ranks evidence-backed causes, and returns a minimal fix plus regression task.',
     ],
     toolPlan: [
-      { toolKind: 'status', purpose: 'Check index freshness before diagnosis.', required: true },
       { toolKind: 'explore', purpose: 'Trace failing behavior and existing tests.', required: true },
-      { toolKind: 'callers', purpose: 'Find upstream reproduction paths for a symbol.', required: false },
-      { toolKind: 'callees', purpose: 'Find downstream failure boundaries for a symbol.', required: false },
-      { toolKind: 'impact', purpose: 'Bound regression risk before fixing.', required: false },
     ],
     producesAgentTask: true,
   },
@@ -560,12 +509,9 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
     contextMode: 'compact',
     intentParsingStrategy:
       'Use for validating a working-tree diff, symbol, file, or completed implementation with the smallest relevant test scope.',
-    mcpToolsRequired: ['status', 'explore', 'impact', 'files'],
+    mcpToolsRequired: ['explore'],
     graphQueryPlan: [
-      'codegraph_status: check index and change freshness.',
-      'codegraph_explore: find affected behavior and existing tests.',
-      'codegraph_impact: identify regression paths when a symbol is known.',
-      'codegraph_files: locate exact test files only when needed.',
+      'codegraph_explore: find affected behavior, existing tests, and regression paths.',
     ],
     contextOptimizationStrategy:
       'Compact mode: changed scope, affected tests, exact validation commands, and residual risk only.',
@@ -577,10 +523,7 @@ export const WORKFLOW_DEFINITIONS: Record<CodeBrainWorkflowKind, WorkflowDefinit
       'CodeBrain: maps the diff to affected tests and returns a short, ordered validation path.',
     ],
     toolPlan: [
-      { toolKind: 'status', purpose: 'Check index and working-tree freshness.', required: true },
       { toolKind: 'explore', purpose: 'Find affected behavior and nearby tests.', required: true },
-      { toolKind: 'impact', purpose: 'Find regression paths for a known symbol.', required: false },
-      { toolKind: 'files', purpose: 'Locate exact test files if explore is incomplete.', required: false },
     ],
     producesAgentTask: false,
   },

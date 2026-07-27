@@ -1,379 +1,102 @@
-# CodeBrain
+# CodeBrain - Repository-Aware AI Workflow Orchestration
 
-Repository-aware AI workflows for VS Code, powered by CodeGraph and GitHub Copilot Chat.
+**CodeBrain** là một VS Code Extension đóng vai trò như một hệ thống điều phối quy trình làm việc (workflow orchestration) AI có nhận thức về toàn bộ repository. Extension kết nối **GitHub Copilot Chat** với công cụ phân tích đồ thị **CodeGraph** và các **MCP (Model Context Protocol) Servers** để giúp AI hiểu được kiến trúc hệ thống, luồng thực thi, phân tích ảnh hưởng (impact analysis) và tạo ra các nhiệm vụ tự động hóa (Agent tasks) chuẩn xác.
 
-CodeBrain helps developers use AI with real repository structure instead of isolated prompt context. It indexes a workspace into a local code graph, selects the most relevant files and relationships for each task, then routes that context into Copilot Chat workflows such as architecture explanation, impact analysis, code review, and test planning.
+Tài liệu chi tiết về kiến trúc luồng hoạt động nội bộ xem tại: [Luồng hoạt động của CodeBrain (docs/operating-flow.md)](file:///d:/me/AI/repo/gitnexus-vscode/docs/operating-flow.md)
 
-## AI Campaign Summary
+---
 
-Modern AI coding assistants are strong at generating code, but they often reason from temporary context. In large repositories, that is not enough: a small change can affect callers, tests, API consumers, build flows, and hidden dependencies across multiple modules.
+## 🌟 Tính năng chính
 
-CodeBrain turns the repository into persistent software intelligence:
+CodeBrain cung cấp một bộ công cụ điều phối thông minh thông qua các Slash Commands (`@CodeBrain`) trong Copilot Chat:
 
-- CodeGraph builds a local index of files, symbols, dependencies, callers, callees, and impact paths.
-- CodeBrain chooses the right workflow and trims context before sending it to Copilot Chat.
-- Copilot reasons over graph-backed evidence instead of guessing from nearby files.
-- Developers get explainable outputs: context used, why it was selected, token reduction, files scanned, and files selected.
+| Command | Mục đích & Luồng Hoạt Động | Kiểu Ngữ Cảnh | Output |
+| :--- | :--- | :--- | :--- |
+| **`/architecture`** | Phân tích cấu trúc hệ thống, sơ đồ phân cấp thư mục và các cụm phụ thuộc (clusters). | **Full** | Sơ đồ kiến trúc (Mermaid), tổng quan module và cảnh báo rủi ro. |
+| **`/explain`** | Giải thích chi tiết một symbol (class, function), luồng dữ liệu (data flow) và thứ tự chạy (runtime execution flow). | **Balanced** | Luồng xử lý chính, luồng dữ liệu, sơ đồ Mermaid. |
+| **`/impact`** | Phân tích tầm ảnh hưởng (blast radius) tại độ sâu `d=1` (direct callers) và đánh giá rủi ro (risk level: High/Critical). | **Balanced** | Phân tích rủi ro, blast radius, khuyến nghị hành động. |
+| **`/review`** | Đánh giá trực tiếp các thay đổi hiện tại (Git diff/PR) dựa trên đồ thị gọi hàm, phát hiện rủi ro logic và kiểm thử. | **Balanced** | Phạm vi thay đổi, phát hiện lỗi, đánh giá rủi ro và các bước xác minh. |
+| **`/plan`** / **`/develop`** | Lập kế hoạch triển khai tính năng mới từ yêu cầu (bao gồm tích hợp Jira/Confluence nếu có). | **Balanced** | Phân tích giải pháp, kế hoạch triển khai chi tiết và **Copilot Agent Task**. |
+| **`/fix`** | Chuẩn đoán lỗi dựa trên dấu hiệu (symptom) và đề xuất phương án sửa lỗi tối giản, an toàn cùng ca kiểm thử. | **Balanced** | Chuản đoán, phương án sửa đổi tối giản và regression tests. |
+| **`/test`** / **`/verify`** | Tạo kịch bản kiểm thử (test plan) và xác minh nhanh các file bị ảnh hưởng bởi thay đổi với phạm vi nhỏ nhất. | **Compact** | Danh sách test targets, test cases chi tiết và các lệnh chạy xác minh. |
+| **`/diagram`** | Tạo sơ đồ tuần tự (sequence diagram) hoặc sơ đồ luồng (flow diagram) định dạng Mermaid cho một lớp hoặc hàm. | **Balanced** | Mã Mermaid độc lập có thể xem trước. |
 
-The result is a safer AI workflow for onboarding, refactoring, reviewing, and validating code changes.
+---
 
-## What CodeBrain Does
+## 🛠️ Yêu cầu hệ thống (Prerequisites)
 
-| Workflow | Use it for | Output |
-| --- | --- | --- |
-| `@CodeBrain /develop` | Take a feature or ticket from requirement to an Agent-ready implementation path. | Current behavior, impact, minimal plan, implementation task, and verification. |
-| `@CodeBrain /fix` | Diagnose a failure or regression before proposing a change. | Evidence, root-cause confidence, minimal fix task, and regression coverage. |
-| `@CodeBrain /verify` | Validate a diff, file, or symbol after implementation. | Affected tests, narrow-to-broad checks, and residual risk. |
-| `@CodeBrain /architecture` | Understand a new repository or module area. | Architecture map, components, relationships, and risks. |
-| `@CodeBrain /explain` | Understand a file, symbol, or execution flow. | Step-by-step behavior, data flow, callers/callees, and recommendations. |
-| `@CodeBrain /impact` | Check blast radius before changing APIs or shared code. | Direct and indirect dependents, affected modules, risk level, and validation scope. |
-| `@CodeBrain /review` | Review staged or working-tree changes. | Findings first, regression risks, missing coverage, and suggested fixes. |
-| `@CodeBrain /test` | Build a focused regression checklist. | Unit, integration, and affected-path test recommendations. |
-| `@CodeBrain /detect_change` | Map local diffs to impacted code paths. | Changed scope, graph impact, and follow-up validation. |
-| `@CodeBrain /plan` | Prepare an Agent-ready implementation plan. | Jira/collab context when available, tasks, target files, constraints, risks, and verification steps. |
+- **VS Code**: Phiên bản `1.100.0` trở lên.
+- **GitHub Copilot**: Đã cài đặt extension và đăng nhập tài khoản.
+- **Node.js**: Phiên bản `20` trở lên (để chạy CodeBrain CLI / CodeGraph CLI).
+- **Git**: Thư mục làm việc (workspace) nên được quản lý bằng Git.
 
-## Campaign Demo Guide
+Kiểm tra nhanh môi trường:
+```powershell
+node --version
+git --version
+```
 
-Use this flow when submitting or presenting CodeBrain for an AI campaign.
+---
 
-### 1. Install the extension
+## 🚀 Cài đặt & Thiết lập nhanh
 
-Open VS Code, then install the packaged extension:
+### 1. Cài đặt Extension
+* **Từ file VSIX**: Mở màn hình Extensions (`Ctrl+Shift+X`) -> Chọn dấu ba chấm `...` góc phải -> Chọn **Install from VSIX...** -> Chọn file `codebrain-vscode.vsix`.
+* **Môi trường Phát triển (Developer Mode)**:
+  ```powershell
+  npm install
+  npm run compile
+  ```
+  Nhấn `F5` để mở cửa sổ *Extension Development Host* thử nghiệm.
 
-1. Open Extensions with `Ctrl+Shift+X`.
-2. Open the `...` menu.
-3. Choose `Install from VSIX...`.
-4. Select `codebrain-vscode.vsix`.
-
-### 2. Open a real repository
-
-Open any TypeScript, JavaScript, or multi-file application repository. For the clearest demo, choose a project with services, controllers, UI components, tests, or shared utilities.
-
-### 3. Set up CodeBrain
-
-Run this command from the Command Palette:
-
+### 2. Thiết lập (Setup & Analyze)
+Mở Command Palette (`Ctrl+Shift+P` hoặc `F1`), chạy lệnh:
 ```text
-CodeBrain: Setup CodeBrain Runtime
+CodeBrain: Setup
 ```
+Lệnh này sẽ tự động:
+- Kiểm tra/cài đặt CodeBrain CLI.
+- Đăng ký MCP Provider cho GitHub Copilot.
+- Tạo các cấu hình mặc định cho dự án.
 
-This verifies the bundled CodeGraph runtime and creates the Copilot Agent scaffold at:
-
+Sau đó, tiến hành lập chỉ mục (index) mã nguồn bằng cách chạy:
 ```text
-.github/agents/codebrain.agent.md
+CodeBrain: Analyze Active Context
 ```
+*Lưu ý: Chat Participant cần chỉ mục này để phân tích luồng và cấu trúc gọi hàm chính xác. Bạn có thể theo dõi trạng thái index trên Status Bar.*
 
-### 4. Analyze the workspace
+---
 
-Run:
+## 💻 Giao diện làm việc (VS Code UI)
 
+1. **Activity Bar Tab**: Chứa bảng điều khiển của CodeBrain:
+   - **Quick Actions**: Các thao tác nhanh như Setup, Analyze, Force Re-index, Show Status, Open Graph Dashboard, PR Review.
+   - **Copilot Agents**: Quản lý các Agent hỗ trợ lập trình.
+2. **Status Bar Indicator**: Hiển thị độ mới (freshness) của index:
+   - `Fresh`: Đồ thị chỉ mục đã đồng bộ đầy đủ với mã nguồn.
+   - `Stale`: Có sự thay đổi trong code chưa được lập chỉ mục lại.
+   - `Not indexed`: Thư mục chưa từng được phân tích đồ thị.
+   - `Indexing`: Đang chạy ngầm quá trình phân tích đồ thị.
+3. **Editor Context Menu**: Click chuột phải trong editor để gọi nhanh các workflow như *Explain Current Flow*, *Analyze Impact*, *Generate Plan*, *Generate Flow Diagram*, v.v.
+
+---
+
+## 🔍 Tối ưu hóa Tokens (Token Optimization)
+
+Để tránh vượt quá dung lượng ngữ cảnh (Context Window) của LLM trong các dự án lớn, CodeBrain tự động quản lý ngân sách tokens theo 3 chế độ:
+- **`compact`**: Tập trung vào ngữ cảnh cực kỳ ngắn gọn (giới hạn ~7k tokens). Phù hợp cho việc xác minh nhanh (`/verify`).
+- **`balanced`**: Cân bằng giữa tệp tin thay đổi và các tệp tin gọi/được gọi trực tiếp (giới hạn ~14k tokens). Phù hợp cho giải thích, tác động, lập kế hoạch.
+- **`full`**: Lấy toàn bộ kiến trúc xung quanh và các mối quan hệ đồ thị sâu hơn (giới hạn ~22k tokens). Phù hợp cho phân tích kiến trúc tổng thể (`/architecture`).
+
+Bạn có thể thay đổi chế độ mặc định bằng cách chạy lệnh:
 ```text
-CodeBrain: Analyze Workspace
+CodeBrain: Set Token Optimization Mode
 ```
 
-CodeBrain initializes or syncs the local CodeGraph index for the current workspace.
+---
 
-### 5. Show repository understanding
+## 📚 Tài liệu tham khảo
 
-Open Copilot Chat and ask:
-
-```text
-@CodeBrain /architecture
-Explain the main modules and how requests flow through this repository.
-```
-
-Expected result:
-
-- Key modules and responsibilities.
-- Important relationships between files and components.
-- Context report showing files scanned and files selected.
-
-### 6. Show impact analysis
-
-Open a service, controller, API handler, or shared utility. Select a function name or type:
-
-```text
-@CodeBrain /impact
-What will be affected if I change this symbol?
-```
-
-Expected result:
-
-- Direct callers and downstream dependents.
-- Affected modules or tests.
-- Risk summary and validation checklist.
-
-### 7. Show review workflow
-
-Make a small local change, then run:
-
-```text
-CodeBrain: Workflow: Review Changes
-```
-
-Expected result:
-
-- Findings ordered by severity.
-- Graph-backed risk analysis.
-- Missing tests or validation steps.
-- Clear explanation of selected context.
-
-### 8. Generate a plan
-
-Ask:
-
-```text
-@CodeBrain /plan ABC-123
-Update the affected callers from the Jira issue and linked collab doc, then propose the safest verification path.
-```
-
-Expected result:
-
-- Agent-ready implementation tasks.
-- Files likely to edit.
-- Risks and rollback notes.
-- Test plan for the affected flow.
-
-## Collaboration Guide
-
-Use this section when multiple people are evaluating the extension during an AI campaign demo.
-
-| Role | What to do | Best command |
-| --- | --- | --- |
-| Presenter | Show how CodeBrain turns a repository into graph-backed AI context. | `@CodeBrain /architecture` |
-| Reviewer or judge | Ask what changed and whether the change is risky. | `CodeBrain: Workflow: Review Changes` |
-| Developer collaborator | Select a symbol and inspect affected callers, callees, and tests. | `CodeBrain: Impact Lens: Analyze Impact` |
-| AI agent operator | Convert analysis into a structured implementation task. | `@CodeBrain /plan` |
-
-Suggested collaboration flow:
-
-1. Presenter runs `CodeBrain: Analyze Workspace`.
-2. Reviewer asks for `/architecture` to confirm repository understanding.
-3. Developer collaborator makes or selects a small code change.
-4. Reviewer runs `/impact` or `Workflow: Review Changes`.
-5. AI agent operator uses `/plan` to produce a safe execution plan.
-6. Team validates with `/test` before treating the result as merge-ready.
-
-## Why It Is Different
-
-Traditional AI coding assistant:
-
-```text
-Reads nearby files -> guesses related context -> generates an answer
-```
-
-CodeBrain:
-
-```text
-Indexes the repository -> retrieves graph relationships -> optimizes context -> guides Copilot workflows
-```
-
-Key differences:
-
-- Persistent repository intelligence instead of one-off prompt retrieval.
-- Local-first indexing, suitable for private and enterprise codebases.
-- Deterministic graph evidence for callers, callees, dependencies, and impact.
-- Workflow-specific context selection for explain, review, impact, test, and implementation planning.
-- Transparent context report so reviewers can see what the AI used.
-
-## Core Features
-
-- VS Code chat participant: `@CodeBrain`.
-- Built-in MCP server definition provider: `codebrain.codegraph`.
-- Bundled CodeGraph runtime assets under `runtime/codegraph`, executed with the system `node`.
-- Impact Lens view for symbol-level impact, callers, callees, tests, and chat handoff.
-- Auto-generated flow diagrams from CodeGraph callers/callees via Command Palette.
-- Token optimization modes: `auto`, `compact`, `balanced`, `full`, `off`.
-- Copilot Agent scaffold at `.github/agents/codebrain.agent.md`.
-- Command Palette shortcuts for setup, indexing, workflow prompts, review, and graph queries.
-
-## Requirements
-
-- VS Code `^1.106.0`
-- GitHub Copilot Chat extension
-- Active GitHub Copilot sign-in
-- Node.js installed on the host machine (required by the extension runtime, development, and packaging)
-
-## Installation
-
-### Install from VSIX
-
-```text
-Extensions -> ... -> Install from VSIX... -> codebrain-vscode.vsix
-```
-
-### Install for Development
-
-```bash
-npm install
-npm run compile
-```
-
-Press `F5` in VS Code to launch an Extension Development Host.
-
-### Build a VSIX Package
-
-```bash
-npm run package
-```
-
-The package is written to:
-
-```text
-codebrain-vscode.vsix
-```
-
-## Quick Start
-
-1. Open a repository in VS Code.
-2. Run `CodeBrain: Setup CodeBrain Runtime`.
-3. Run `CodeBrain: Analyze Workspace`.
-4. Open Copilot Chat.
-5. Ask `@CodeBrain /architecture` or `@CodeBrain /explain`.
-6. Before changing shared code, ask `@CodeBrain /impact`.
-7. Before commit or pull request, run `CodeBrain: Workflow: Review Changes`.
-
-## Recommended Developer Workflow
-
-For most work, use one short entry point and follow the suggested actions in chat:
-
-```text
-/develop <feature or ticket> -> Agent implementation -> /verify -> /review
-/fix <symptom or regression> -> Agent fix -> /verify -> /review
-```
-
-The lower-level commands remain available when you need direct analysis:
-
-1. Understand the current flow with `/explain`.
-2. Check blast radius with `/impact`.
-3. Implement the change manually or with Copilot Agent.
-4. Review the diff with `/review`.
-5. Generate focused validation with `/test`.
-6. Re-run `Analyze Workspace` after major branch switches, merges, or large refactors.
-
-## Command Palette Reference
-
-### Setup and Indexing
-
-| Command | What it does |
-| --- | --- |
-| `CodeBrain: Setup CodeBrain Runtime` | Verifies bundled runtime and bootstraps workspace assets. |
-| `CodeBrain: Prepare CodeGraph Runtime` | Rebuilds or refreshes the local CodeGraph runtime from project sources. |
-| `CodeBrain: Analyze Workspace` | Initializes or syncs the CodeGraph index for the current workspace. |
-| `CodeBrain: Analyze This Item` | Analyzes the selected tree/context item. |
-| `CodeBrain: Force Re-index` | Rebuilds the index from scratch. |
-| `CodeBrain: Show Index Status` | Displays index health and freshness. |
-| `CodeBrain: Query CodeGraph` | Runs direct graph queries for ad-hoc exploration. |
-| `CodeBrain: Generate Flow Diagram` | Generates a flow diagram for the active symbol or query. |
-| `CodeBrain: Clean CodeGraph Index` | Removes the workspace CodeGraph index. |
-
-### Workflows
-
-| Command | What it opens |
-| --- | --- |
-| `CodeBrain: Workflow: Explain Architecture` | `@CodeBrain /architecture` |
-| `CodeBrain: Workflow: Explain Current Flow` | `@CodeBrain /explain` |
-| `CodeBrain: Workflow: Analyze Impact` | `@CodeBrain /impact` |
-| `CodeBrain: Workflow: Review Changes` | `@CodeBrain /review` |
-| `CodeBrain: Workflow: Generate Test Plan` | `@CodeBrain /test` |
-| `CodeBrain: Workflow: Detect Change Impact` | `@CodeBrain /detect_change` |
-| `CodeBrain: Workflow: Generate Plan` | `@CodeBrain /plan` |
-
-### Impact Lens
-
-| Command | What it does |
-| --- | --- |
-| `CodeBrain: Impact Lens: Analyze Impact` | Runs impact analysis for the selected symbol or cursor target. |
-| `CodeBrain: Impact Lens: Find Callers` | Lists upstream call sites. |
-| `CodeBrain: Impact Lens: Find Callees` | Lists downstream calls. |
-| `CodeBrain: Impact Lens: Find Affected Tests` | Finds likely regression tests. |
-| `CodeBrain: Impact Lens: Ask CodeBrain About Target` | Sends active target context into Copilot Chat. |
-
-## Settings
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `codebrain.autoSetupOnOpen` | `true` | Automatically run first-time CodeGraph setup on workspace open. |
-| `codebrain.autoIndex.onOpen` | `false` | Automatically sync stale workspaces on open. |
-| `codebrain.autoIndex.onBranchChange` | `false` | Reserved for future branch-change auto-sync behavior. |
-| `codebrain.stalenessCheckIntervalSeconds` | `0` | Periodic sync interval in seconds. `0` disables periodic sync. |
-| `codebrain.tokenOptimization.mode` | `auto` | Chooses context optimization mode. |
-| `codebrain.tokenOptimization.compactMaxTokens` | `6000` | Target token budget for compact mode. |
-| `codebrain.tokenOptimization.balancedMaxTokens` | `12000` | Target token budget for balanced mode. |
-| `codebrain.tokenOptimization.fullMaxTokens` | `24000` | Target token budget for full mode. |
-
-## Workflow Output Contract
-
-CodeBrain workflow responses should make context selection auditable:
-
-- Context Used
-- Why Selected
-- Token Reduction
-- Files Scanned
-- Files Selected
-
-If a metric is unavailable from CodeGraph output, it should be reported as `Unknown`.
-
-See `docs/codebrain-v2-workflows.md` for the full workflow matrix and behavior contract.
-
-## Troubleshooting
-
-### `No language model available`
-
-- Confirm GitHub Copilot is installed and signed in.
-- Open Copilot Chat and choose a concrete model.
-- Reload the VS Code window.
-
-### Chat cannot use CodeGraph tools
-
-- Run `CodeBrain: Setup CodeBrain Runtime`.
-- Reload VS Code.
-- Run `CodeBrain: Analyze Workspace`.
-
-### Index is stale or missing
-
-- Run `CodeBrain: Show Index Status`.
-- Run `CodeBrain: Analyze Workspace`.
-- Use `CodeBrain: Force Re-index` if results still look outdated.
-
-### Review output has weak context
-
-- Make sure the workspace is a Git repository.
-- Re-run `CodeBrain: Analyze Workspace`.
-- Ask a more specific question that includes a symbol, file path, or feature name.
-
-## Submission Checklist
-
-Before submitting CodeBrain to an AI campaign:
-
-- Build the VSIX with `npm run package`.
-- Install and test `codebrain-vscode.vsix` in a clean VS Code window.
-- Run `CodeBrain: Setup CodeBrain Runtime`.
-- Run `CodeBrain: Analyze Workspace` on a demo repository.
-- Capture screenshots or video of `/architecture`, `/impact`, `/review`, and `/plan`.
-- Include the repository link and the packaged VSIX in the submission.
-- Highlight that CodeBrain is local-first and uses graph-backed context selection.
-
-## Release Notes
-
-### 2.0.0 - 2026-06-08
-
-CodeBrain v2 introduces a repository-aware AI workflow system powered by CodeGraph and GitHub Copilot Chat.
-
-Added:
-
-- `@CodeBrain` chat participant with `/architecture`, `/explain`, `/impact`, `/review`, `/test`, `/detect_change`, and `/plan`.
-- Workflow output contract for context, selection rationale, token reduction, scanned files, and selected files.
-- Bundled CodeGraph runtime and indexing lifecycle commands.
-- Impact Lens UI for callers, callees, affected tests, impact analysis, and chat handoff.
-- Copilot Agent scaffold generation.
-- Token optimization modes and configurable token budgets.
-
-Breaking changes:
-
-- Legacy workflow prompts were replaced by structured `@CodeBrain` commands.
-- Requirements were updated to VS Code `^1.106.0` and GitHub Copilot Chat.
-
-## License
-
-MIT
+- [Hướng dẫn sử dụng chi tiết (docs/HDSD.md)](file:///d:/me/AI/repo/gitnexus-vscode/docs/HDSD.md)
+- [Quy trình hoạt động chi tiết (docs/operating-flow.md)](file:///d:/me/AI/repo/gitnexus-vscode/docs/operating-flow.md)
+- [Đặc tả Workflow CodeBrain v2 (docs/codebrain-v2-workflows.md)](file:///d:/me/AI/repo/gitnexus-vscode/docs/codebrain-v2-workflows.md)

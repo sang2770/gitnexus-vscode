@@ -40,49 +40,14 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
 
     const actions: Array<{ label: string; description: string; command: string }> = [
       {
-        label: 'Develop Feature',
-        description: 'Short CodeGraph workflow from requirement to implementation and verification',
-        command: 'codebrain.workflow.develop',
-      },
-      {
-        label: 'Fix Bug',
-        description: 'Trace evidence, bound impact, and prepare a minimal regression-safe fix',
-        command: 'codebrain.workflow.fix',
-      },
-      {
-        label: 'Verify Change',
-        description: 'Find and order the smallest affected validation scope',
-        command: 'codebrain.workflow.verify',
-      },
-      {
         label: 'Explain Current Flow',
         description: 'Compact graph context for the selected symbol or current file',
         command: 'codebrain.workflow.explain',
       },
       {
-        label: 'Analyze Impact',
-        description: 'Balanced blast-radius analysis for the current symbol',
-        command: 'codebrain.workflow.impact',
-      },
-      {
-        label: 'Review Changes',
-        description: 'Review diffs with CodeGraph context and affected-test preflight',
-        command: 'codebrain.workflow.review',
-      },
-      {
-        label: 'Detect Change Impact',
-        description: 'Map working tree changes to affected flows and risks',
-        command: 'codebrain.workflow.detectChange',
-      },
-      {
         label: 'Generate Plan',
         description: 'Create a Copilot Agent task grounded in graph plus optional Atlassian context',
         command: 'codebrain.workflow.plan',
-      },
-      {
-        label: 'Generate Test Plan',
-        description: 'Plan focused regression coverage for the current target',
-        command: 'codebrain.workflow.test',
       },
       {
         label: 'Explain Architecture',
@@ -100,19 +65,9 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
         command: 'codebrain.tokenOptimization.selectMode',
       },
       {
-        label: 'Setup CodeBrain Runtime',
-        description: 'Prepare CodeGraph runtime and local Copilot agent',
-        command: 'codebrain.setup',
-      },
-      {
         label: 'Create CodeBrain Copilot Agent',
         description: 'Create .github/agents/codebrain.agent.md for VS Code Copilot',
         command: 'codebrain.createCopilotAgent',
-      },
-      {
-        label: 'Check for Updates',
-        description: 'Check GitHub releases for a newer CodeBrain VSIX',
-        command: 'codebrain.checkForUpdates',
       },
       {
         label: 'Analyze Workspace',
@@ -123,16 +78,6 @@ export class QuickActionsTreeProvider implements vscode.TreeDataProvider<TreeNod
         label: 'Force Re-index',
         description: 'Full rebuild of the CodeGraph index',
         command: 'codebrain.analyzeForce',
-      },
-      {
-        label: 'Show Index Status',
-        description: 'Check CodeGraph index freshness',
-        command: 'codebrain.status',
-      },
-      {
-        label: 'Query CodeGraph',
-        description: 'Search symbols in the CodeGraph index',
-        command: 'codebrain.query',
       },
       {
         label: 'Review Code with CodeBrain',
